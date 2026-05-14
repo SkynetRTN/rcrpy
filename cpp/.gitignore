@@ -1,0 +1,29 @@
+# c++ files
+src/ExampleModels.cpp
+src/ExampleModels.h
+src/RCRstarterfile.cpp
+src/example.cpp
+src/wack.cpp
+
+# binary files
+src/*.so
+
+# packaging files
+build
+dist
+rcr.egg-info
+var
+
+# misc/testing
+src/test.py
+**/.vscode/
+**/src/RCR
+**__pycache__
+/docs/build
+src/sphinx_test.py
+tests/maintest.py
+tests/functional_calc_test.py
+
+# deprecated
+/example_imgs
+tests/functional_calc_test_simple.py
