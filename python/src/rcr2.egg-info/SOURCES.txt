@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+src/rcr2/__init__.py
+src/rcr2/api.py
+src/rcr2/rejection.py
+src/rcr2/stats.py
+src/rcr2/tables.py
+src/rcr2.egg-info/PKG-INFO
+src/rcr2.egg-info/SOURCES.txt
+src/rcr2.egg-info/dependency_links.txt
+src/rcr2.egg-info/requires.txt
+src/rcr2.egg-info/top_level.txt
+tests/test_smoke.py

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rcr2"
+version = "0.0.0"
+description = "Robust Chauvenet Rejection, Python reimplementation (RCR 2.0)"
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [
+    {name = "UNC Physics RCR successors"},
+]
+dependencies = [
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "rcr>=2.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
