@@ -923,16 +923,20 @@ void FunctionalForm::buildModelSpace()
 			totalcomboweight += comboweight;
 			combosweights.push_back(comboweight);
 		}
-		// drawing the random combos:
-
-		std::random_device rd;
-		std::mt19937 gen(rd());
-		std::uniform_real_distribution<> dis(0, totalcomboweight); // generates psuedo-random numbers between 0 and the sum of weights
+		// drawing the random combos.
+		// Originally used std::random_device + std::uniform_real_distribution,
+		// which is (a) non-reproducible across runs and (b) implementation-
+		// dependent (libstdc++ vs MSVC vs libc++ yield different bit patterns).
+		// Fixed seed + raw uint32 -> [0, totalcomboweight) gives bit-identical
+		// behavior across runs and across implementations. The rcr2 Python
+		// port (full_rcr.py) mirrors this exact arithmetic to achieve
+		// bit-identical port-to-oracle parity.
+		std::mt19937 gen(0xC0FFEEUL);
 
 																   // doing all random draws:
-		for (int j = 0; j < combolimit; j++) //each iteration of this takes ~0.1 seconds 
+		for (int j = 0; j < combolimit; j++) //each iteration of this takes ~0.1 seconds
 		{
-			double randomnum = dis(gen);
+			double randomnum = ((double)gen() / 4294967296.0) * totalcomboweight;
 			for (int k = 0; k < combosgoodcount; k++)
 			{
 				randomnum -= combosweights[k];

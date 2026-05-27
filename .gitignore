@@ -1,0 +1,162 @@
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Distribution / packaging
+build/
+dist/
+wheels/
+*.egg
+*.egg-info/
+*.whl
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Type checkers / linters
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.ruff_cache/
+.pytype/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Sphinx documentation
+docs/_build/
+
+# ============================================================================
+# Virtual environments (project-specific names + the standard ones)
+# ============================================================================
+.venv/
+.venv-*/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ============================================================================
+# C++ build artifacts
+# ============================================================================
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# Build directories
+build/
+build-*/
+cmake-build-*/
+
+# ============================================================================
+# IDE / editor state
+# ============================================================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+
+# JetBrains
+*.iml
+.idea_modules/
+
+# ============================================================================
+# OS junk
+# ============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ============================================================================
+# Claude / agent local state (conversation transcripts live here on the user's
+# machine; do not commit even by accident if a .claude/ ends up in the repo).
+# ============================================================================
+.claude/
+.aider*
+CLAUDE.md.local
+
+# ============================================================================
+# Logs and temporary files
+# ============================================================================
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# ============================================================================
+# Local secrets / credentials (defense in depth — nothing should ever be here)
+# ============================================================================
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+
+# ============================================================================
+# Project-specific
+# ============================================================================
+# Compiled rcr extension lands here after pip install -e cpp/
+cpp/rcr.*.pyd
+cpp/rcr.*.so
+cpp/build/
+
+# Background-task transcripts (Claude Code writes these locally during sessions)
+*.output
+
+# Editor swap files in nested dirs
+**/*~

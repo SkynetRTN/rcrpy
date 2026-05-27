@@ -1,5 +1,0 @@
-numpy>=1.26
-
-[dev]
-pytest>=8
-rcr>=2.4

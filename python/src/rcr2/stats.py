@@ -17,10 +17,33 @@ import numpy as np
 # Numerical primitives
 # ---------------------------------------------------------------------------
 
+def _cpp_seqsum(arr: np.ndarray) -> float:
+    """Sequential left-to-right summation matching C++'s naive `+=` loop.
+
+    `np.sum` uses pairwise summation (numerically more accurate but a
+    different bit pattern than C++). `np.cumsum(...)[-1]` is implemented
+    as a sequential C loop, so it produces bit-identical results to
+    C++'s ``double s = 0; for (i) s += arr[i];`` pattern. Required for
+    bit-identical parity through the double-line sigma estimator
+    (fitDL_w/mFinder_w) where summation drift cascades into ES_MODE_DL
+    + parametric rejection decisions.
+    """
+    if arr.size == 0:
+        return 0.0
+    return float(np.cumsum(arr.astype(np.float64, copy=False))[-1])
+
+
 def erfcCustom(x: float) -> float:
     """Closed-form Chebyshev-like approximation of erfc used by RCR. Ported
     from cpp/src/RCR.cpp:196. Do NOT replace with scipy.special.erfc — the
-    rejection boundary depends on this exact approximation."""
+    rejection boundary depends on this exact approximation.
+
+    Guards against Python's overflow-to-exception on enormous `x` (which
+    can occur when parametric residuals on one side of mu collapse to a
+    near-zero sigma and the rejection ratio explodes). C++ silently goes
+    to 1/inf == 0; Python raises. We catch and return 0.0, matching the
+    mathematical limit erfc(x) → 0 as x → ∞.
+    """
     x = x / math.sqrt(2.0)
     inner = (
         1.0
@@ -31,7 +54,10 @@ def erfcCustom(x: float) -> float:
         + x * (0.0002765672
         + 0.0000430638 * x)))))
     )
-    return 1.0 / inner ** 16
+    try:
+        return 1.0 / inner ** 16
+    except OverflowError:
+        return 0.0
 
 
 def isEqual(x: float, y: float,
@@ -48,6 +74,28 @@ def isEqual(x: float, y: float,
     else:
         rel = abs((x - y) / x) if x != 0 else float("inf")
     return rel <= max_relative_error
+
+
+def isEqual_vec_scalar(a: np.ndarray, b: float,
+                       max_relative_error: float = 1e-8) -> np.ndarray:
+    """Vectorized `isEqual(a[i], b)` for an array `a` and scalar `b`.
+    Same semantics as the scalar `isEqual`: an entry is "equal to b" iff
+        |a[i] - b| < DBL_MIN  OR
+        |a[i] - b| / max(|a[i]|, |b|)  <=  rel_tol.
+    Returns a bool ndarray the same shape as a.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    tiny = np.finfo(np.float64).tiny
+    diff = np.abs(a - b)
+    abs_a = np.abs(a)
+    abs_b = abs(b)
+    larger = np.maximum(abs_a, abs_b)
+    abs_close = diff < tiny
+    # rel_diff is meaningful only when larger > 0; in the both-zero case
+    # abs_close already returns True. Use np.where to dodge 0/0 warnings.
+    safe = np.where(larger > 0, larger, 1.0)
+    rel = diff / safe
+    return abs_close | (rel <= max_relative_error)
 
 
 def getDiff(mu: float, datum: float) -> float:
@@ -132,64 +180,76 @@ def _binarySearch(search_up: bool, minimum_index: int, to_find: float, to_search
 def halfSampleMode_w(w: np.ndarray, y: np.ndarray) -> float:
     """Port of cpp/src/RCR.cpp:531 — getMode(trueCount, w, y), weighted.
 
-    Same iterative-halving structure as the unweighted version, but the
-    cumulative s_vec uses weights and the inner search is LINEAR (not the
-    binary search that the unweighted variant uses)."""
+    Vectorized. The C++ inner loop builds the cumulative half-weight vector
+        s_vec[i] = w[0] + w[1] + ... + w[i-1] + 0.5 * w[i]
+    (with the lower-bound offset), then for each i searches for the matching
+    forward (branch 1) or backward (branch 2) k whose s_vec[k] differs from
+    s_vec[i] by `half_weight_sum`. Branches 1 and 2 together iterate the same
+    set of (i, k) endpoint pairs from both ends; vectorizing the forward
+    sweep alone gives the same min-distance answer.
+
+    Replacing the linear search with `np.searchsorted(side='right')` is
+    correct because s_vec is monotonically non-decreasing (positive weights).
+    """
     n = y.size
     lower_limit, upper_limit = 0, n - 1
     lower_limit_in, upper_limit_in = -1, -1
-    final_lower, final_upper = -1, -1
-    min_dist = 999999.0
+    REL_TOL = 1e-8
 
     while lower_limit != lower_limit_in or upper_limit != upper_limit_in:
         lower_limit_in = lower_limit
         upper_limit_in = upper_limit
         size = upper_limit - lower_limit + 1
-        min_dist = 999999.0
-        half_weight_sum = float(np.sum(w[lower_limit:upper_limit + 1])) * 0.5
+        if size <= 1:
+            break
 
-        s_vec = np.empty(size, dtype=np.float64)
-        s_sum = 0.5 * float(w[lower_limit])
-        s_vec[0] = s_sum
-        for i in range(lower_limit + 1, lower_limit + size):
-            s_sum += float(w[i - 1]) * 0.5 + float(w[i]) * 0.5
-            s_vec[i - lower_limit] = s_sum
+        y_win = y[lower_limit:upper_limit + 1]
+        w_win = w[lower_limit:upper_limit + 1]
 
-        for i in range(s_vec.size):
-            if s_vec[i] < half_weight_sum or isEqual(float(s_vec[i]), half_weight_sum):
-                total = s_vec[i] + half_weight_sum
-                k = i  # NOTE: linear search, not binarySearch (cf. unweighted)
-                while k < s_vec.size and (s_vec[k] < total or isEqual(float(s_vec[k]), total)):
-                    k += 1
-                k -= 1
-                total = abs(y[k + lower_limit] - y[i + lower_limit])
+        cumw = np.cumsum(w_win)
+        s_vec = cumw - 0.5 * w_win
+        half_weight_sum = float(cumw[-1]) * 0.5
 
-                if isEqual(total, min_dist):
-                    final_lower = min(final_lower, i + lower_limit)
-                    final_upper = max(final_upper, k + lower_limit)
-                elif total < min_dist:
-                    min_dist = total
-                    final_lower = i + lower_limit
-                    final_upper = k + lower_limit
+        # Branch 1 forward sweep: for each i, find largest k with
+        # s_vec[k] <= s_vec[i] + half_weight_sum. searchsorted with
+        # side='right' returns the *first* index where the value would be
+        # inserted to keep sorted order; subtract 1 to get the LAST index
+        # that's <= the target. This matches the C++ linear forward search
+        # (where the loop advances while still <= total, then steps back).
+        totals = s_vec + half_weight_sum
+        ks = np.searchsorted(s_vec, totals, side="right") - 1
 
-            if s_vec[i] > half_weight_sum or isEqual(float(s_vec[i]), half_weight_sum):
-                total = s_vec[i] - half_weight_sum
-                k = i  # linear search, not binarySearch
-                while k > -1 and (s_vec[k] > total or isEqual(float(s_vec[k]), total)):
-                    k -= 1
-                k += 1
-                total = abs(y[i + lower_limit] - y[k + lower_limit])
+        # Valid i values (branch 1 fires): s_vec[i] <= half_weight_sum
+        # (with isEqual relative tolerance). For i past that, s_vec[i] + hws
+        # exceeds the maximum s_vec value, ks[i] saturates at size-1, and
+        # those candidates are dominated by branch-2-equivalent windows that
+        # branch-1 already considered with smaller i. Mask them out.
+        valid_b1 = (s_vec < half_weight_sum) | (
+            np.abs(s_vec - half_weight_sum) <= REL_TOL * abs(half_weight_sum)
+        )
+        # Also drop i where the forward window doesn't reach the requested
+        # weight (totals > s_vec[-1] beyond isEqual tolerance — symmetrically
+        # those are covered by branch 2 from larger i).
+        within_range = totals <= s_vec[-1] * (1.0 + REL_TOL) + REL_TOL
+        valid = valid_b1 & within_range
 
-                if isEqual(total, min_dist):
-                    final_lower = min(final_lower, k + lower_limit)
-                    final_upper = max(final_upper, i + lower_limit)
-                elif total < min_dist:
-                    min_dist = total
-                    final_lower = k + lower_limit
-                    final_upper = i + lower_limit
+        distances = np.where(valid, np.abs(y_win[ks] - y_win), np.inf)
+        min_dist = float(np.min(distances))
+        if not np.isfinite(min_dist):
+            break  # degenerate; shouldn't occur for positive weights
 
-        lower_limit = final_lower
-        upper_limit = final_upper
+        if min_dist == 0.0:
+            tied = (distances == 0.0)
+        else:
+            tied = np.abs(distances - min_dist) <= REL_TOL * abs(min_dist)
+        tied_idx = np.where(tied)[0]
+
+        final_lower = int(tied_idx[0]) + lower_limit
+        # Across ties, take the maximum upper endpoint (mirrors the
+        # max(finalUpper, ...) expansion in the C++).
+        final_upper = int(np.max(ks[tied_idx])) + lower_limit
+
+        lower_limit, upper_limit = final_lower, final_upper
 
     window_y = y[lower_limit:upper_limit + 1]
     window_w = w[lower_limit:upper_limit + 1]
@@ -236,14 +296,17 @@ def getXVec_w(size: int, w: np.ndarray) -> np.ndarray:
 def getOriginFixedRegressionLine_w(start: int, end: int, w: np.ndarray,
                                    x: np.ndarray, y: np.ndarray) -> float:
     """Port of cpp/src/RCR.cpp:709. Slope of best-fit line through the
-    origin: sum(w*x*y) / sum(w*x*x) over [start, end)."""
-    prod_x = 0.0
-    prod_y = 0.0
-    for i in range(start, end):
-        wx = float(w[i]) * float(x[i])
-        prod_x += wx * float(x[i])
-        prod_y += wx * float(y[i])
-    return prod_y / prod_x
+    origin: sum(w*x*y) / sum(w*x*x) over [start, end). Uses sequential
+    summation matching C++'s `+=` accumulation order — required so the
+    `single_line_fit` value (which becomes the sigma fallback in fitDL_w)
+    is bit-identical to the C++."""
+    w_s = w[start:end]
+    x_s = x[start:end]
+    y_s = y[start:end]
+    wx = w_s * x_s
+    num = _cpp_seqsum(wx * y_s)
+    den = _cpp_seqsum(wx * x_s)
+    return float(num / den)
 
 
 def fitSL_w(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
@@ -253,9 +316,13 @@ def fitSL_w(w: np.ndarray, x: np.ndarray, y: np.ndarray) -> float:
 
 def mFinder_w(low: int, high: int, last_x_under_one: int, increment: int,
               w: np.ndarray, x: np.ndarray, y: np.ndarray) -> int:
-    """Port of cpp/src/RCR.cpp:730. Search for the best break-point `m` for
-    the piecewise double-line fit, by iteratively refining around the
-    minimum-error candidate."""
+    """Port of cpp/src/RCR.cpp:730. Each-m accumulators use sequential
+    summation matching the C++'s naive `+=` order; required for
+    bit-identical parity in the double-line sigma estimator (see
+    fitDL_w's docstring for the full chain). The outer m-loop stays
+    Python because each iteration depends on the running best-m via
+    m_low/m_high.
+    """
     DBL_MAX = float("inf")
     stop = False
     best_m = -1
@@ -265,31 +332,46 @@ def mFinder_w(low: int, high: int, last_x_under_one: int, increment: int,
     while not stop:
         m = low
         while m < high:
-            error = 0.0
-            a = b = c = d = e = f = 0.0
             x_at_m = float(x[m])
-            for i in range(m + 1):
-                wx = float(w[i]) * float(x[i])
-                a += wx * float(x[i])
-                e += wx * float(y[i])
-            for i in range(m + 1, last_x_under_one + 1):
-                diff = float(x[i]) - x_at_m
-                wi = float(w[i])
-                a += x_at_m * x_at_m * wi
-                b += x_at_m * wi * diff
-                d += wi * diff * diff
-                e += x_at_m * wi * float(y[i])
-                f += wi * float(y[i]) * diff
+
+            # Per-index term arrays in C++ left-then-right order. `a` and
+            # `e` accumulate across both loops (cpp/src/RCR.cpp:747-762).
+            w_l = w[:m + 1]
+            x_l = x[:m + 1]
+            y_l = y[:m + 1]
+            wx_l = w_l * x_l
+            a_terms_left = wx_l * x_l
+            e_terms_left = wx_l * y_l
+
+            end_r = last_x_under_one + 1
+            w_r = w[m + 1:end_r]
+            x_r = x[m + 1:end_r]
+            y_r = y[m + 1:end_r]
+            diff_r = x_r - x_at_m
+            xatm_w_r = x_at_m * w_r
+            a_terms_right = (x_at_m * x_at_m) * w_r
+            b_terms = xatm_w_r * diff_r
+            d_terms = (w_r * diff_r) * diff_r
+            e_terms_right = xatm_w_r * y_r
+            f_terms = (w_r * y_r) * diff_r
+
+            a = _cpp_seqsum(np.concatenate([a_terms_left, a_terms_right]))
+            e = _cpp_seqsum(np.concatenate([e_terms_left, e_terms_right]))
+            b = _cpp_seqsum(b_terms)
+            d = _cpp_seqsum(d_terms)
+            f = _cpp_seqsum(f_terms)
             c = b
             if a != 0 and (d - c * b) != 0:
                 tau = (f - e * c / a) / (d - c * b / a)
                 sigma = (e - tau * b) / a
-                for i in range(m + 1):
-                    factor = sigma * float(x[i]) - float(y[i])
-                    error += float(w[i]) * factor * factor
-                for i in range(m + 1, last_x_under_one + 1):
-                    factor = sigma * x_at_m + tau * (float(x[i]) - x_at_m) - float(y[i])
-                    error += float(w[i]) * factor * factor
+
+                factors_l = sigma * x_l - y_l
+                err_terms_left = (w_l * factors_l) * factors_l
+                factors_r = sigma * x_at_m + tau * diff_r - y_r
+                err_terms_right = (w_r * factors_r) * factors_r
+                error = _cpp_seqsum(
+                    np.concatenate([err_terms_left, err_terms_right]))
+
                 if error < min_error:
                     min_error = error
                     best_m = m
@@ -312,8 +394,14 @@ def fitDL_w(counter: float, w: np.ndarray, x: np.ndarray, y: np.ndarray,
             get_fn_w) -> float:
     """Port of cpp/src/RCR.cpp:5785. Weighted double-line sigma estimator.
 
-    `get_fn_w(n, x, w) -> float` selects the FN model — pass getLowerFN_w
-    when sigmaChoice=LOWER, getSingleFN_w when SINGLE, etc.
+    Uses sequential (left-to-right) summation via _cpp_seqsum to match
+    the C++'s naive `+=` accumulation order bit-for-bit. The previous
+    implementation used np.sum (pairwise) which drifted ~1e-15 per call
+    and cascaded into 8-20% parameter divergence on ES_MODE_DL +
+    parametric (where two independent sigma_below/sigma_above tracks
+    amplify the drift). `a` and `e` accumulate across BOTH the left and
+    right loops in C++; we concatenate the term arrays so a single
+    cumsum produces the same order. Same for double_line_error.
     """
     amount_x_under_one = countAmountLessThanOne(x)
     single_line_fit = getOriginFixedRegressionLine_w(0, amount_x_under_one, w, x, y)
@@ -322,35 +410,56 @@ def fitDL_w(counter: float, w: np.ndarray, x: np.ndarray, y: np.ndarray,
     m = mFinder_w(1, amount_x_under_one - 1, amount_x_under_one - 1,
                   max(int(y.size / 6.36), 1), w, x, y)
     x_at_m = float(x[m])
-    a = b = c = d = e = f = 0.0
-    for i in range(m + 1):
-        wx = float(w[i]) * float(x[i])
-        a += wx * float(x[i])
-        e += wx * float(y[i])
-    for i in range(m + 1, amount_x_under_one):
-        diff = float(x[i]) - x_at_m
-        wi = float(w[i])
-        a += x_at_m * x_at_m * wi
-        b += x_at_m * wi * diff
-        d += wi * diff * diff
-        e += x_at_m * wi * float(y[i])
-        f += wi * float(y[i]) * diff
+
+    # Per-index term arrays. Multiplication order must match the C++
+    # exactly: `wxProd = w[i]*x[i]; a += wxProd * x[i]` → `(w*x) * x`.
+    # Left piece (i in [0, m+1)):
+    w_l = w[:m + 1]
+    x_l = x[:m + 1]
+    y_l = y[:m + 1]
+    wx_l = w_l * x_l
+    a_terms_left = wx_l * x_l
+    e_terms_left = wx_l * y_l
+
+    # Right piece (i in [m+1, amount_x_under_one)):
+    w_r = w[m + 1:amount_x_under_one]
+    x_r = x[m + 1:amount_x_under_one]
+    y_r = y[m + 1:amount_x_under_one]
+    diff_r = x_r - x_at_m
+    xatm_w_r = x_at_m * w_r
+    a_terms_right = (x_at_m * x_at_m) * w_r
+    b_terms = xatm_w_r * diff_r
+    d_terms = (w_r * diff_r) * diff_r
+    e_terms_right = xatm_w_r * y_r
+    f_terms = (w_r * y_r) * diff_r
+
+    # Sequential cumsum matching C++ `+=` order. `a` and `e` accumulate
+    # across BOTH loops in C++ (lines 5797-5811), so concatenate before
+    # summing.
+    a = _cpp_seqsum(np.concatenate([a_terms_left, a_terms_right]))
+    e = _cpp_seqsum(np.concatenate([e_terms_left, e_terms_right]))
+    b = _cpp_seqsum(b_terms)
+    d = _cpp_seqsum(d_terms)
+    f = _cpp_seqsum(f_terms)
     c = b
+
     tau = (f - e * c / a) / (d - c * b / a)
     sigma = (e - tau * b) / a
 
-    double_line_error = 0.0
-    for i in range(m + 1):
-        factor = sigma * float(x[i]) - float(y[i])
-        double_line_error += float(w[i]) * factor * factor
-    for i in range(m + 1, amount_x_under_one):
-        factor = sigma * x_at_m + tau * (float(x[i]) - x_at_m) - float(y[i])
-        double_line_error += float(w[i]) * factor * factor
+    # Double-line error also accumulates across both loops in C++.
+    factors_l = sigma * x_l - y_l
+    err_terms_left = (w_l * factors_l) * factors_l
+    factors_r = sigma * x_at_m + tau * diff_r - y_r
+    err_terms_right = (w_r * factors_r) * factors_r
+    double_line_error = _cpp_seqsum(
+        np.concatenate([err_terms_left, err_terms_right]))
 
-    single_line_error = 0.0
-    for i in range(amount_x_under_one):
-        err_at_i = single_line_fit * float(x[i]) - float(y[i])
-        single_line_error += float(w[i]) * err_at_i * err_at_i
+    # Single-line error: single loop in C++ (5828-5832).
+    w_full = w[:amount_x_under_one]
+    x_full = x[:amount_x_under_one]
+    y_full = y[:amount_x_under_one]
+    err_full = single_line_fit * x_full - y_full
+    single_line_error = _cpp_seqsum(w_full * err_full * err_full)
 
     delta_chi_squared = (single_line_error - double_line_error) / double_line_error
 

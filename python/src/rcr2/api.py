@@ -23,6 +23,16 @@ class RejectionTech(Enum):
     ES_MODE_DL = "ES_MODE_DL"
 
 
+class MuType(Enum):
+    """How `mu` is computed each iteration. VALUE is the default (use the
+    handled muTech directly on `y`); PARAMETRIC and NONPARAMETRIC delegate
+    to a model object that the user attaches via setter methods on RCR.
+    Ports of cpp/src/RCR.h::MuTypes."""
+    VALUE = "VALUE"
+    PARAMETRIC = "PARAMETRIC"      # FunctionalForm — not yet wired in rcr2
+    NONPARAMETRIC = "NONPARAMETRIC"
+
+
 @dataclass
 class RCRResults:
     mu: float = float("nan")
@@ -53,9 +63,29 @@ class RCR:
     def __init__(self, rejection_tech: RejectionTech = RejectionTech.SS_MEDIAN_DL):
         self.rejection_tech = rejection_tech
         self.result = RCRResults()
+        self.mu_type: MuType = MuType.VALUE
+        self.non_parametric_model = None  # set via set_non_parametric_model
+        self.parametric_model = None      # set via set_parametric_model
 
     def set_rejection_tech(self, tech: RejectionTech) -> None:
         self.rejection_tech = tech
+
+    def set_mu_type(self, mu_type: MuType) -> None:
+        self.mu_type = mu_type
+
+    def set_non_parametric_model(self, model) -> None:
+        """Attach a `rcr2.NonParametric` subclass instance. The user must
+        also call `set_mu_type(MuType.NONPARAMETRIC)`. Port of
+        cpp/src/RCR.h::setNonParametricModel."""
+        self.non_parametric_model = model
+        self.mu_type = MuType.NONPARAMETRIC
+
+    def set_parametric_model(self, model) -> None:
+        """Attach a `rcr2.FunctionalForm` instance for model-fitting RCR.
+        Sets mu_type to PARAMETRIC automatically. Port of
+        cpp/src/RCR.h::setParametricModel."""
+        self.parametric_model = model
+        self.mu_type = MuType.PARAMETRIC
 
     def perform_rejection(
         self,
@@ -65,7 +95,13 @@ class RCR:
         from rcr2 import rejection
         y_arr = np.asarray(y, dtype=np.float64)
         w_arr = None if w is None else np.asarray(w, dtype=np.float64)
-        out = rejection.performRejection_LS(y_arr, self.rejection_tech.value, w=w_arr)
+        out = rejection.performRejection_LS(
+            y_arr, self.rejection_tech.value, w=w_arr,
+            non_parametric_model=(self.non_parametric_model
+                                   if self.mu_type is MuType.NONPARAMETRIC else None),
+            parametric_model=(self.parametric_model
+                              if self.mu_type is MuType.PARAMETRIC else None),
+        )
         r = self.result
         r.mu = out["mu"]
         r.flags = out["flags"]
@@ -100,7 +136,13 @@ class RCR:
         from rcr2 import rejection
         y_arr = np.asarray(y, dtype=np.float64)
         w_arr = None if w is None else np.asarray(w, dtype=np.float64)
-        out = rejection.performBulkRejection_LS(y_arr, self.rejection_tech.value, w=w_arr)
+        out = rejection.performBulkRejection_LS(
+            y_arr, self.rejection_tech.value, w=w_arr,
+            non_parametric_model=(self.non_parametric_model
+                                   if self.mu_type is MuType.NONPARAMETRIC else None),
+            parametric_model=(self.parametric_model
+                              if self.mu_type is MuType.PARAMETRIC else None),
+        )
         r = self.result
         r.mu = out["mu"]
         r.flags = out["flags"]

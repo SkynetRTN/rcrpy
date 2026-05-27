@@ -40,6 +40,14 @@ class SigmaChoice(Enum):
     EACH = "EACH"
 
 
+# Floor used in each-sigma rejection loops when a side's sigma collapses
+# to 0 or negative. Mirrors the C++'s implicit "x/0 = inf → erfc(inf) = 0
+# → reject" behavior: with sigma replaced by ~2.2e-308, the rejection
+# ratio is astronomically large and the worst-residual point on that side
+# gets rejected, identical to what the C++ does.
+_SIGMA_FLOOR = float(np.finfo(np.float64).tiny)
+
+
 # ---------------------------------------------------------------------------
 # Forward declarations (the FN helpers reference each other via the dispatch
 # inside fitDL; the actual bodies are below).
@@ -348,6 +356,49 @@ def _mu(mu_tech: MuTech, trueY: np.ndarray) -> tuple[float, np.ndarray]:
     return stats.halfSampleMode(s), s
 
 
+def _select_candidates(
+    flags: np.ndarray, y: np.ndarray, mu_tech: "MuTech",
+    non_parametric_model=None, parametric_model=None,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Unweighted (indices, trueY, mu) selection for the iterative/bulk
+    loop bodies. Handles all three mu_types (VALUE/NONPARAMETRIC/PARAMETRIC)
+    in one place to keep the loops short."""
+    if parametric_model is not None:
+        parametric_model.set_true_vec(flags, y)
+        mu_name = mu_tech.value if hasattr(mu_tech, "value") else str(mu_tech)
+        needs_combos = mu_name in ("MEDIAN", "MODE")
+        parametric_model.build_model_space(build_combos=needs_combos)
+        trueY = parametric_model.handle_mu_tech_select(mu_tech=mu_name)
+        return parametric_model.indices, trueY, 0.0
+    if non_parametric_model is not None:
+        indices, trueY = non_parametric_model.mu_func(flags, y)
+        mu, _ = _mu(mu_tech, trueY)
+        return indices, trueY, mu
+    indices = np.where(flags)[0]
+    trueY = y[indices]
+    mu, _ = _mu(mu_tech, trueY)
+    return indices, trueY, mu
+
+
+def _select_candidates_w(
+    flags: np.ndarray, w: np.ndarray, y: np.ndarray, mu_tech: "MuTech",
+    non_parametric_model=None, parametric_model=None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Weighted (indices, trueW, trueY, mu) selection."""
+    if parametric_model is not None:
+        parametric_model.set_true_vec(flags, y, w=w)
+        mu_name = mu_tech.value if hasattr(mu_tech, "value") else str(mu_tech)
+        needs_combos = mu_name in ("MEDIAN", "MODE")
+        parametric_model.build_model_space(build_combos=needs_combos)
+        trueY = parametric_model.handle_mu_tech_select(mu_tech=mu_name)
+        return parametric_model.indices, parametric_model.trueW, trueY, 0.0
+    if non_parametric_model is not None:
+        indices, trueW, trueY = non_parametric_model.mu_func_w(flags, w, y)
+        return indices, trueW, trueY, _mu_w(mu_tech, trueW, trueY)
+    indices = np.where(flags)[0]
+    return indices, w[indices], y[indices], _mu_w(mu_tech, w[indices], y[indices])
+
+
 def _mu_w(mu_tech: MuTech, trueW: np.ndarray, trueY: np.ndarray) -> float:
     """Weighted mu dispatch — handleMuTechSelect(w, y) at cpp/src/RCR.cpp:5907.
     For MEDIAN and MODE the C++ does sort(w, y) (sort y ascending, w along)
@@ -453,6 +504,8 @@ def iterativeLowerSigmaRCR(
     sigma_tech: SigmaTech,
     delta: float,
     n_correct_fn,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Port of cpp/src/RCR.cpp:6408 — iterativeLowerSigmaRCR(y), unweighted.
 
@@ -470,45 +523,39 @@ def iterativeLowerSigmaRCR(
 
     stop = False
     while not stop:
-        # setTrueVec: filter y by flags
-        indices = np.where(flags)[0]
-        trueY = y[indices]
+        indices, trueY, mu = _select_candidates(
+            flags, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
 
-        mu, _sorted = _mu(mu_tech, trueY)
+        # Vectorized port of the C++ per-iteration walk (cpp/src/RCR.cpp:6461).
+        # Computes |y-mu|, locates the worst residual, and splits the kept
+        # set into below/above-mu lists. Ties at mu go to BOTH lists; only
+        # the LAST tied point's position is reweighted to 0.5 (mirrors a
+        # quirk in the C++ that is intentionally preserved for parity —
+        # see rcr2-porting-gotchas memory).
+        diff = np.abs(trueY - mu)
+        max_local = int(np.argmax(diff))
+        max_val = float(diff[max_local])
+        max_index = int(indices[max_local])
 
-        # Walk trueY computing |y-mu|, track max, split below/above
-        # (Mirror the C++ exactly — tie at mu goes to BOTH lists with
-        # weight 0.5 on the LAST tie's position. See cpp/src/RCR.cpp:6461.)
-        diff_below_list: list[float] = []
-        diff_above_list: list[float] = []
-        below_split_idx = -1
-        above_split_idx = -1
-        split = False
-        max_val = -99999.0
-        max_index = -1
-        for i in range(true_count):
-            yi = float(trueY[i])
-            hold = stats.getDiff(mu, yi)
-            if hold > max_val:
-                max_val = hold
-                max_index = int(indices[i])
-            if stats.isEqual(yi, mu):
-                diff_below_list.append(hold)
-                diff_above_list.append(hold)
-                split = True
-                below_split_idx = len(diff_below_list) - 1
-                above_split_idx = len(diff_above_list) - 1
-            elif yi > mu:
-                diff_above_list.append(hold)
-            else:
-                diff_below_list.append(hold)
-
-        diff_below = np.array(diff_below_list, dtype=np.float64)
-        diff_above = np.array(diff_above_list, dtype=np.float64)
+        is_eq = stats.isEqual_vec_scalar(trueY, mu)
+        # Order-preserving partition: keep_below covers (y<mu OR y==mu),
+        # keep_above covers (y>mu OR y==mu). The C++ appends ties to BOTH
+        # lists in trueY order; np.where preserves that ordering.
+        keep_below = (trueY < mu) | is_eq
+        keep_above = (trueY > mu) | is_eq
+        diff_below = diff[keep_below]
+        diff_above = diff[keep_above]
         w_below = np.ones(diff_below.size, dtype=np.float64)
         w_above = np.ones(diff_above.size, dtype=np.float64)
+        split = bool(is_eq.any())
         if split:
+            last_eq = int(np.where(is_eq)[0][-1])
+            # Position of `last_eq` within keep_below (zero-indexed): the
+            # number of True entries in keep_below at indices <= last_eq,
+            # minus one.
+            below_split_idx = int(np.sum(keep_below[: last_eq + 1])) - 1
+            above_split_idx = int(np.sum(keep_above[: last_eq + 1])) - 1
             w_below[below_split_idx] = 0.5
             w_above[above_split_idx] = 0.5
 
@@ -564,6 +611,8 @@ def iterativeLowerSigmaRCR_w(
     sigma_tech: SigmaTech,
     delta: float,
     n_correct_fn,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Weighted twin of iterativeLowerSigmaRCR. Port of cpp/src/RCR.cpp:6261.
 
@@ -580,42 +629,28 @@ def iterativeLowerSigmaRCR_w(
 
     stop = False
     while not stop:
-        indices = np.where(flags)[0]
-        trueY = y[indices]
-        trueW = w[indices]
+        indices, trueW, trueY, mu = _select_candidates_w(
+            flags, w, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
 
-        mu = _mu_w(mu_tech, trueW, trueY)
+        # Vectorized weighted twin of the unweighted lower-sigma walk.
+        # Ties at mu get 0.5*trueW[i] in BOTH lists (this is the "no LAST-
+        # only bug" weighted variant — see cpp/src/RCR.cpp:6331+).
+        diff = np.abs(trueY - mu)
+        max_local = int(np.argmax(diff))
+        max_val = float(diff[max_local])
+        max_index = int(indices[max_local])
 
-        diff_below_list: list[float] = []
-        diff_above_list: list[float] = []
-        w_below_list: list[float] = []
-        w_above_list: list[float] = []
-        max_val = -99999.0
-        max_index = -1
-        for i in range(true_count):
-            yi = float(trueY[i])
-            wi = float(trueW[i])
-            hold = stats.getDiff(mu, yi)
-            if hold > max_val:
-                max_val = hold
-                max_index = int(indices[i])
-            if stats.isEqual(yi, mu):
-                diff_below_list.append(hold)
-                diff_above_list.append(hold)
-                w_below_list.append(0.5 * wi)
-                w_above_list.append(0.5 * wi)
-            elif yi > mu:
-                diff_above_list.append(hold)
-                w_above_list.append(wi)
-            else:
-                diff_below_list.append(hold)
-                w_below_list.append(wi)
-
-        diff_below = np.array(diff_below_list, dtype=np.float64)
-        diff_above = np.array(diff_above_list, dtype=np.float64)
-        w_below_arr = np.array(w_below_list, dtype=np.float64)
-        w_above_arr = np.array(w_above_list, dtype=np.float64)
+        is_eq = stats.isEqual_vec_scalar(trueY, mu)
+        keep_below = (trueY < mu) | is_eq
+        keep_above = (trueY > mu) | is_eq
+        diff_below = diff[keep_below]
+        diff_above = diff[keep_above]
+        # Weights: full trueW for below_only / above_only, 0.5*trueW for ties.
+        w_below_full = np.where(is_eq, 0.5 * trueW, trueW)
+        w_above_full = np.where(is_eq, 0.5 * trueW, trueW)
+        w_below_arr = w_below_full[keep_below]
+        w_above_arr = w_above_full[keep_above]
 
         nonzero_above = diff_above.size > 0
         nonzero_below = diff_below.size > 0
@@ -663,6 +698,8 @@ def iterativeEachSigmaRCR(
     sigma_tech: SigmaTech,
     delta: float,
     n_correct_fn,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Port of cpp/src/RCR.cpp:6707 — iterativeEachSigmaRCR(y), unweighted.
 
@@ -681,36 +718,27 @@ def iterativeEachSigmaRCR(
 
     stop = False
     while not stop:
-        indices = np.where(flags)[0]
-        trueY = y[indices]
+        indices, trueY, mu = _select_candidates(
+            flags, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
 
-        mu, _ = _mu(mu_tech, trueY)
-
-        diff_below_list: list[float] = []
-        diff_above_list: list[float] = []
-        below_split_idx = -1
-        above_split_idx = -1
-        split = False
-        for i in range(true_count):
-            yi = float(trueY[i])
-            hold = stats.getDiff(mu, yi)
-            if stats.isEqual(yi, mu):
-                diff_below_list.append(hold)
-                diff_above_list.append(hold)
-                split = True
-                below_split_idx = len(diff_below_list) - 1
-                above_split_idx = len(diff_above_list) - 1
-            elif yi > mu:
-                diff_above_list.append(hold)
-            else:
-                diff_below_list.append(hold)
-
-        diff_below = np.array(diff_below_list, dtype=np.float64)
-        diff_above = np.array(diff_above_list, dtype=np.float64)
+        # Vectorized each-sigma walk. Mirrors the unweighted lower-sigma
+        # variant's tie handling (LAST tie position gets 0.5 weight),
+        # except each-sigma doesn't track max here — that happens later
+        # in the original-y side-aware max-ratio scan.
+        diff = np.abs(trueY - mu)
+        is_eq = stats.isEqual_vec_scalar(trueY, mu)
+        keep_below = (trueY < mu) | is_eq
+        keep_above = (trueY > mu) | is_eq
+        diff_below = diff[keep_below]
+        diff_above = diff[keep_above]
         w_below = np.ones(diff_below.size, dtype=np.float64)
         w_above = np.ones(diff_above.size, dtype=np.float64)
+        split = bool(is_eq.any())
         if split:
+            last_eq = int(np.where(is_eq)[0][-1])
+            below_split_idx = int(np.sum(keep_below[: last_eq + 1])) - 1
+            above_split_idx = int(np.sum(keep_above[: last_eq + 1])) - 1
             w_below[below_split_idx] = 0.5
             w_above[above_split_idx] = 0.5
 
@@ -732,6 +760,19 @@ def iterativeEachSigmaRCR(
             sigma_above = st_dev_above * n_correction
 
         # Find max of |y-mu|/sigma over the original y, side-dependent.
+        #
+        # Two degenerate cases need handling distinctly:
+        #   - EMPTY side (sigma_X stays at -1.0 sentinel because there were
+        #     no points on that side this iteration): don't consider any
+        #     candidates from this side.
+        #   - DEGENERATE side (sigma_X collapsed to ≤ 0 even though the
+        #     side had points — e.g., all residuals on that side were
+        #     exactly equal): the C++ does FP `hold / 0 = +inf` and uses
+        #     the rejection criterion erfc(inf) = 0 to reject the worst
+        #     point. We mirror that with a tiny sigma floor so the ratio
+        #     becomes effectively `inf` and the same point gets selected.
+        #
+        # `nonzero_below` / `nonzero_above` distinguish the two cases.
         max_val = -99999.0
         max_index = -1
         for i in range(y.size):
@@ -739,14 +780,27 @@ def iterativeEachSigmaRCR(
                 continue
             yi = float(y[i])
             hold = abs(yi - mu)
-            if yi < mu and (hold / sigma_below) > max_val:
-                max_val = hold / sigma_below
-                max_index = i
-            if yi > mu and (hold / sigma_above) > max_val:
-                max_val = hold / sigma_above
-                max_index = i
+            if yi < mu and nonzero_below:
+                s = sigma_below if sigma_below > 0 else _SIGMA_FLOOR
+                ratio = hold / s
+                if ratio > max_val:
+                    max_val = ratio
+                    max_index = i
+            if yi > mu and nonzero_above:
+                s = sigma_above if sigma_above > 0 else _SIGMA_FLOOR
+                ratio = hold / s
+                if ratio > max_val:
+                    max_val = ratio
+                    max_index = i
 
-        stop = _reject(true_count, max_index, max_val, flags, y)
+        if max_index < 0:
+            # No valid rejection candidate (e.g., all kept residuals
+            # exactly at mu). The C++ here is technically undefined
+            # behavior — `maxIndex` is uninitialized. We choose the safe
+            # interpretation: terminate the loop.
+            stop = True
+        else:
+            stop = _reject(true_count, max_index, max_val, flags, y)
 
     return {
         "mu": mu,
@@ -765,6 +819,8 @@ def iterativeEachSigmaRCR_w(
     sigma_tech: SigmaTech,
     delta: float,
     n_correct_fn,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Weighted twin of iterativeEachSigmaRCR. Port of cpp/src/RCR.cpp:6557.
     Tie-at-mu distributes 0.5*trueW[i] to both sides (no LAST-only bug)."""
@@ -776,37 +832,23 @@ def iterativeEachSigmaRCR_w(
 
     stop = False
     while not stop:
-        indices = np.where(flags)[0]
-        trueY = y[indices]
-        trueW = w[indices]
+        indices, trueW, trueY, mu = _select_candidates_w(
+            flags, w, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
 
-        mu = _mu_w(mu_tech, trueW, trueY)
-
-        diff_below_list: list[float] = []
-        diff_above_list: list[float] = []
-        w_below_list: list[float] = []
-        w_above_list: list[float] = []
-        for i in range(true_count):
-            yi = float(trueY[i])
-            wi = float(trueW[i])
-            hold = stats.getDiff(mu, yi)
-            if stats.isEqual(yi, mu):
-                diff_below_list.append(hold)
-                diff_above_list.append(hold)
-                w_below_list.append(0.5 * wi)
-                w_above_list.append(0.5 * wi)
-            elif yi > mu:
-                diff_above_list.append(hold)
-                w_above_list.append(wi)
-            else:
-                diff_below_list.append(hold)
-                w_below_list.append(wi)
-
-        diff_below = np.array(diff_below_list, dtype=np.float64)
-        diff_above = np.array(diff_above_list, dtype=np.float64)
-        w_below_arr = np.array(w_below_list, dtype=np.float64)
-        w_above_arr = np.array(w_above_list, dtype=np.float64)
+        # Vectorized weighted each-sigma walk. Ties at mu get 0.5*trueW[i]
+        # in BOTH lists (no LAST-only quirk for the weighted variant —
+        # cpp/src/RCR.cpp:6557+).
+        diff = np.abs(trueY - mu)
+        is_eq = stats.isEqual_vec_scalar(trueY, mu)
+        keep_below = (trueY < mu) | is_eq
+        keep_above = (trueY > mu) | is_eq
+        diff_below = diff[keep_below]
+        diff_above = diff[keep_above]
+        w_below_full = np.where(is_eq, 0.5 * trueW, trueW)
+        w_above_full = np.where(is_eq, 0.5 * trueW, trueW)
+        w_below_arr = w_below_full[keep_below]
+        w_above_arr = w_above_full[keep_above]
 
         nonzero_above = diff_above.size > 0
         nonzero_below = diff_below.size > 0
@@ -825,6 +867,8 @@ def iterativeEachSigmaRCR_w(
             st_dev_above = _sigma_each(sigma_tech, w_above_arr, diff_above, delta, true_count)
             sigma_above = st_dev_above * n_correction
 
+        # See iterativeEachSigmaRCR for the rationale on the two-sentinel
+        # split (empty side vs degenerate side).
         max_val = -99999.0
         max_index = -1
         for i in range(y.size):
@@ -832,14 +876,23 @@ def iterativeEachSigmaRCR_w(
                 continue
             yi = float(y[i])
             hold = abs(yi - mu)
-            if yi < mu and (hold / sigma_below) > max_val:
-                max_val = hold / sigma_below
-                max_index = i
-            if yi > mu and (hold / sigma_above) > max_val:
-                max_val = hold / sigma_above
-                max_index = i
+            if yi < mu and nonzero_below:
+                s = sigma_below if sigma_below > 0 else _SIGMA_FLOOR
+                ratio = hold / s
+                if ratio > max_val:
+                    max_val = ratio
+                    max_index = i
+            if yi > mu and nonzero_above:
+                s = sigma_above if sigma_above > 0 else _SIGMA_FLOOR
+                ratio = hold / s
+                if ratio > max_val:
+                    max_val = ratio
+                    max_index = i
 
-        stop = _reject(true_count, max_index, max_val, flags, y)
+        if max_index < 0:
+            stop = True
+        else:
+            stop = _reject(true_count, max_index, max_val, flags, y)
 
     return {
         "mu": mu,
@@ -857,6 +910,8 @@ def iterativeSingleSigmaRCR(
     sigma_tech: SigmaTech,
     delta: float,
     n_correct_fn,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Port of cpp/src/RCR.cpp:6168 — iterativeSingleSigmaRCR(y), unweighted.
 
@@ -868,11 +923,9 @@ def iterativeSingleSigmaRCR(
     st_dev = -1.0
     stop = False
     while not stop:
-        indices = np.where(flags)[0]
-        trueY = y[indices]
+        indices, trueY, mu = _select_candidates(
+            flags, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu, _ = _mu(mu_tech, trueY)
 
         diff = np.abs(trueY - mu)
         max_local = int(np.argmax(diff))
@@ -903,6 +956,8 @@ def iterativeSingleSigmaRCR_w(
     sigma_tech: SigmaTech,
     delta: float,
     n_correct_fn,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Port of cpp/src/RCR.cpp:6066 — weighted single-sigma loop.
 
@@ -913,12 +968,9 @@ def iterativeSingleSigmaRCR_w(
     st_dev = -1.0
     stop = False
     while not stop:
-        indices = np.where(flags)[0]
-        trueY = y[indices]
-        trueW = w[indices]
+        indices, trueW, trueY, mu = _select_candidates_w(
+            flags, w, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu = _mu_w(mu_tech, trueW, trueY)
 
         diff = np.abs(trueY - mu)
         max_local = int(np.argmax(diff))
@@ -972,7 +1024,9 @@ def _bulk_reject(flags: np.ndarray, indices_sorted: np.ndarray,
 
 
 def bulkLowerSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
-                      n_correct_fn) -> dict:
+                      n_correct_fn,
+                      non_parametric_model=None,
+                      parametric_model=None) -> dict:
     """Port of cpp/src/RCR.cpp:7173 — bulkLowerSigmaRCR(y), unweighted.
 
     Bulk rejection: one mu/sigma estimate per iteration, then reject ALL
@@ -988,10 +1042,9 @@ def bulkLowerSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
     sigma = -1.0
     stop = False
     while not stop:
-        kept = np.where(flags)[0]
-        trueY = y[kept]
+        kept, trueY, mu = _select_candidates(
+            flags, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-        mu, _ = _mu(mu_tech, trueY)
 
         diff_below_list: list[float] = []
         diff_above_list: list[float] = []
@@ -1054,7 +1107,9 @@ def bulkLowerSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
 
 
 def bulkSingleSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
-                       n_correct_fn) -> dict:
+                       n_correct_fn,
+                       non_parametric_model=None,
+                       parametric_model=None) -> dict:
     """Port of cpp/src/RCR.cpp:6949 — single-sigma bulk, unweighted.
 
     Unlike bulkLowerSigmaRCR, this loop DOES update `trueCount` each
@@ -1065,11 +1120,9 @@ def bulkSingleSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
     sigma = -1.0
     stop = False
     while not stop:
-        kept = np.where(flags)[0]
-        trueY = y[kept]
+        kept, trueY, mu = _select_candidates(
+            flags, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu, _ = _mu(mu_tech, trueY)
 
         diff = np.abs(trueY - mu)
         diff_hold = diff.copy()
@@ -1103,7 +1156,9 @@ def bulkSingleSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
 
 
 def bulkEachSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
-                     n_correct_fn) -> dict:
+                     n_correct_fn,
+                     non_parametric_model=None,
+                     parametric_model=None) -> dict:
     """Port of cpp/src/RCR.cpp:7445 — each-sigma bulk, unweighted.
 
     Each-sigma bulk: sigmaBelow and sigmaAbove computed separately, no min.
@@ -1114,11 +1169,9 @@ def bulkEachSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
     sigma_above = -1.0
     stop = False
     while not stop:
-        kept = np.where(flags)[0]
-        trueY = y[kept]
+        kept, trueY, mu = _select_candidates(
+            flags, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu, _ = _mu(mu_tech, trueY)
 
         diff_below_list: list[float] = []
         diff_above_list: list[float] = []
@@ -1166,15 +1219,19 @@ def bulkEachSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
             w_above = w_above[idx]
             sigma_above = _bulk_sigma_lower_each(w_above, diff_above, true_count) * n_correction
 
-        # Normalize diffHold[i] by the appropriate side's sigma.
+        # Normalize diffHold[i] by the appropriate side's sigma. Use the
+        # tiny floor when a side's sigma collapsed (see _SIGMA_FLOOR
+        # rationale above iterativeEachSigmaRCR).
+        s_below = sigma_below if (nonzero_below and sigma_below > 0) else _SIGMA_FLOOR
+        s_above = sigma_above if (nonzero_above and sigma_above > 0) else _SIGMA_FLOOR
         for i in range(diff_hold_arr.size):
             yi = float(y[int(kept[i])])
             if yi < mu:
-                diff_hold_arr[i] = diff_hold_arr[i] / sigma_below
+                diff_hold_arr[i] = diff_hold_arr[i] / s_below
             elif yi > mu:
-                diff_hold_arr[i] = diff_hold_arr[i] / sigma_above
-            # equal-to-mu case: diff_hold is 0; either side gives 0/inf -> NaN.
-            # Match C++: it doesn't divide for the equal case (neither < nor >).
+                diff_hold_arr[i] = diff_hold_arr[i] / s_above
+            # equal-to-mu case: diff_hold is 0; matches C++ (which doesn't
+            # divide for the equal case — neither yi<mu nor yi>mu fires).
 
         sort_idx = np.argsort(diff_hold_arr, kind="stable")
         indices_sorted = kept[sort_idx]
@@ -1200,19 +1257,18 @@ def _bulk_sigma_lower_each(w: np.ndarray, diff: np.ndarray, counter: int) -> flo
 
 
 def bulkLowerSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
-                        mu_tech: MuTech, n_correct_fn_w) -> dict:
+                        mu_tech: MuTech, n_correct_fn_w,
+                        non_parametric_model=None,
+                        parametric_model=None) -> dict:
     """Port of cpp/src/RCR.cpp:7039. NOTE: unlike unweighted lower bulk,
     the weighted version updates trueCount each iteration (line 7090)."""
     mu = -1.0
     sigma = -1.0
     stop = False
     while not stop:
-        kept = np.where(flags)[0]
-        trueY = y[kept]
-        trueW = w[kept]
+        kept, trueW, trueY, mu = _select_candidates_w(
+            flags, w, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu = _mu_w(mu_tech, trueW, trueY)
 
         diff_below_list: list[float] = []
         diff_above_list: list[float] = []
@@ -1272,19 +1328,18 @@ def bulkLowerSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
 
 
 def bulkSingleSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
-                         mu_tech: MuTech, n_correct_fn_w) -> dict:
+                         mu_tech: MuTech, n_correct_fn_w,
+                         non_parametric_model=None,
+                         parametric_model=None) -> dict:
     """Port of cpp/src/RCR.cpp:6855. Weighted single-sigma bulk.
     C++ does sort(trueW, diff) — sorts diff ascending with trueW along."""
     mu = -1.0
     sigma = -1.0
     stop = False
     while not stop:
-        kept = np.where(flags)[0]
-        trueY = y[kept]
-        trueW = w[kept]
+        kept, trueW, trueY, mu = _select_candidates_w(
+            flags, w, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu = _mu_w(mu_tech, trueW, trueY)
 
         diff = np.abs(trueY - mu)
         diff_hold = diff.copy()
@@ -1318,19 +1373,18 @@ def bulkSingleSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
 
 
 def bulkEachSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
-                       mu_tech: MuTech, n_correct_fn_w) -> dict:
+                       mu_tech: MuTech, n_correct_fn_w,
+                       non_parametric_model=None,
+                       parametric_model=None) -> dict:
     """Port of cpp/src/RCR.cpp:7301. Weighted each-sigma bulk."""
     mu = -1.0
     sigma_below = -1.0
     sigma_above = -1.0
     stop = False
     while not stop:
-        kept = np.where(flags)[0]
-        trueY = y[kept]
-        trueW = w[kept]
+        kept, trueW, trueY, mu = _select_candidates_w(
+            flags, w, y, mu_tech, non_parametric_model, parametric_model)
         true_count = trueY.size
-
-        mu = _mu_w(mu_tech, trueW, trueY)
 
         diff_below_list: list[float] = []
         diff_above_list: list[float] = []
@@ -1374,12 +1428,16 @@ def bulkEachSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
             w_above_arr = w_above_arr[idx]
             sigma_above = _bulk_sigma_lower_each(w_above_arr, diff_above, true_count) * n_correct_fn_w(true_count, trueW)
 
+        # Tiny floor when a side's sigma collapsed (see _SIGMA_FLOOR
+        # rationale above iterativeEachSigmaRCR).
+        s_below = sigma_below if (nonzero_below and sigma_below > 0) else _SIGMA_FLOOR
+        s_above = sigma_above if (nonzero_above and sigma_above > 0) else _SIGMA_FLOOR
         for i in range(diff_hold_arr.size):
             yi = float(y[int(kept[i])])
             if yi < mu:
-                diff_hold_arr[i] = diff_hold_arr[i] / sigma_below
+                diff_hold_arr[i] = diff_hold_arr[i] / s_below
             elif yi > mu:
-                diff_hold_arr[i] = diff_hold_arr[i] / sigma_above
+                diff_hold_arr[i] = diff_hold_arr[i] / s_above
 
         sort_idx = np.argsort(diff_hold_arr, kind="stable")
         indices_sorted = kept[sort_idx]
@@ -1488,6 +1546,8 @@ def performBulkRejection_LS(
     rejection_tech_name: str,
     delta: float = 1.0,
     w: np.ndarray | None = None,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Port of cpp/src/RCR.cpp:5047 — performBulkRejection(y), unweighted.
 
@@ -1520,20 +1580,27 @@ def performBulkRejection_LS(
 
     flags = np.ones(y.size, dtype=bool)
 
+    # When PARAMETRIC, the C++ sets delta = parameterSpace.size() = M
+    # (number of model params) so getStDev's denominator changes.
+    if parametric_model is not None:
+        delta = float(parametric_model.M)
+
+    mods = (non_parametric_model, parametric_model)
+
     if w is None:
         # Pass 1: bulk
         if sigma_choice is SigmaChoice.LOWER:
-            bulkLowerSigmaRCR(y, flags, pass1_mu, n_correct_unw)
+            bulkLowerSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
             iter_loop = iterativeLowerSigmaRCR
         elif sigma_choice is SigmaChoice.SINGLE:
-            bulkSingleSigmaRCR(y, flags, pass1_mu, n_correct_unw)
+            bulkSingleSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
             iter_loop = iterativeSingleSigmaRCR
         else:  # EACH
-            bulkEachSigmaRCR(y, flags, pass1_mu, n_correct_unw)
+            bulkEachSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
             iter_loop = iterativeEachSigmaRCR
-        iter_loop(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw)
-        iter_loop(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw)
-        state = iter_loop(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw)
+        iter_loop(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw, *mods)
+        iter_loop(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw, *mods)
+        state = iter_loop(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw, *mods)
 
         kept = np.where(flags)[0]
         out = {"flags": flags, "indices": kept, "clean_y": y[kept].copy(), **state}
@@ -1542,17 +1609,17 @@ def performBulkRejection_LS(
 
     # Weighted bulk
     if sigma_choice is SigmaChoice.LOWER:
-        bulkLowerSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt)
+        bulkLowerSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
         iter_loop_w = iterativeLowerSigmaRCR_w
     elif sigma_choice is SigmaChoice.SINGLE:
-        bulkSingleSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt)
+        bulkSingleSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
         iter_loop_w = iterativeSingleSigmaRCR_w
     else:
-        bulkEachSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt)
+        bulkEachSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
         iter_loop_w = iterativeEachSigmaRCR_w
-    iter_loop_w(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt)
-    iter_loop_w(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt)
-    state = iter_loop_w(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt)
+    iter_loop_w(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt, *mods)
+    iter_loop_w(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt, *mods)
+    state = iter_loop_w(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt, *mods)
 
     kept = np.where(flags)[0]
     out = {"flags": flags, "indices": kept, "clean_y": y[kept].copy(), **state}
@@ -1565,6 +1632,8 @@ def performRejection_LS(
     rejection_tech_name: str,
     delta: float = 1.0,
     w: np.ndarray | None = None,
+    non_parametric_model=None,
+    parametric_model=None,
 ) -> dict:
     """Port of cpp/src/RCR.cpp:5017 — performRejection(y), restricted to the
     LS_MODE_68 / LS_MODE_DL rejection techs (sigmaChoice=LOWER, muTech=MODE).
@@ -1615,14 +1684,19 @@ def performRejection_LS(
         loop_unw = iterativeEachSigmaRCR
         loop_wgt = iterativeEachSigmaRCR_w
 
+    # All loop families now accept (non_parametric_model, parametric_model)
+    # as the trailing two args.
+    extra_unw = (non_parametric_model, parametric_model)
+    extra_wgt = (non_parametric_model, parametric_model)
+
     if w is None:
-        state = loop_unw(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw)
-        state = loop_unw(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw)
-        state = loop_unw(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw)
+        state = loop_unw(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw, *extra_unw)
+        state = loop_unw(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw, *extra_unw)
+        state = loop_unw(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw, *extra_unw)
     else:
-        state = loop_wgt(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt)
-        state = loop_wgt(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt)
-        state = loop_wgt(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt)
+        state = loop_wgt(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt, *extra_wgt)
+        state = loop_wgt(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt, *extra_wgt)
+        state = loop_wgt(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt, *extra_wgt)
 
     indices_kept = np.where(flags)[0]
     indices_rejected = np.where(~flags)[0]
