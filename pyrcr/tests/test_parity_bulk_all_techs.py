@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import pyrcr
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -18,7 +18,7 @@ def _oracle(tech, y_list):
 
 
 def _port(tech, y):
-    r = rcr2.RCR(tech)
+    r = pyrcr.RCR(tech)
     r.perform_bulk_rejection(y.tolist())
     return r
 
@@ -44,10 +44,10 @@ def _assert_common(port_r, oracle_r, label):
 
 
 @pytest.mark.parametrize("tech_name,port_tech,oracle_tech,sigma_kind", [
-    ("LS_MODE_68",   rcr2.RejectionTech.LS_MODE_68,   None, "lower"),
-    ("LS_MODE_DL",   rcr2.RejectionTech.LS_MODE_DL,   None, "lower"),
-    ("SS_MEDIAN_DL", rcr2.RejectionTech.SS_MEDIAN_DL, None, "single"),
-    ("ES_MODE_DL",   rcr2.RejectionTech.ES_MODE_DL,   None, "each"),
+    ("LS_MODE_68",   pyrcr.RejectionTech.LS_MODE_68,   None, "lower"),
+    ("LS_MODE_DL",   pyrcr.RejectionTech.LS_MODE_DL,   None, "lower"),
+    ("SS_MEDIAN_DL", pyrcr.RejectionTech.SS_MEDIAN_DL, None, "single"),
+    ("ES_MODE_DL",   pyrcr.RejectionTech.ES_MODE_DL,   None, "each"),
 ])
 def test_bulk_smoke(data_smoke, tech_name, port_tech, oracle_tech, sigma_kind):
     oracle_tech = getattr(rcr_oracle, tech_name)
@@ -64,10 +64,10 @@ def test_bulk_smoke(data_smoke, tech_name, port_tech, oracle_tech, sigma_kind):
 
 
 @pytest.mark.parametrize("tech_name,port_tech,sigma_kind", [
-    ("LS_MODE_68",   rcr2.RejectionTech.LS_MODE_68,   "lower"),
-    ("LS_MODE_DL",   rcr2.RejectionTech.LS_MODE_DL,   "lower"),
-    ("SS_MEDIAN_DL", rcr2.RejectionTech.SS_MEDIAN_DL, "single"),
-    ("ES_MODE_DL",   rcr2.RejectionTech.ES_MODE_DL,   "each"),
+    ("LS_MODE_68",   pyrcr.RejectionTech.LS_MODE_68,   "lower"),
+    ("LS_MODE_DL",   pyrcr.RejectionTech.LS_MODE_DL,   "lower"),
+    ("SS_MEDIAN_DL", pyrcr.RejectionTech.SS_MEDIAN_DL, "single"),
+    ("ES_MODE_DL",   pyrcr.RejectionTech.ES_MODE_DL,   "each"),
 ])
 def test_bulk_singlevalue(data_singlevalue, tech_name, port_tech, sigma_kind):
     oracle_tech = getattr(rcr_oracle, tech_name)

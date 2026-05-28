@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import pyrcr
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -89,11 +89,11 @@ def _port_fit(x, y, tech, *, partials, guess, weights=None,
               error_y=None, bulk=False):
     f = partials[0]                              # caller passes (model_fn, partial_list, guess)
     plist = partials[1]
-    model = rcr2.FunctionalForm(
+    model = pyrcr.FunctionalForm(
         f, x, y, plist, guess=guess,
         weights=weights, error_y=error_y,
     )
-    r = rcr2.RCR(tech)
+    r = pyrcr.RCR(tech)
     r.set_parametric_model(model)
     args = {"w": weights.tolist()} if weights is not None else {}
     if bulk:
@@ -147,9 +147,9 @@ def test_bulk_parametric_parity_lsmode68(frac_out, seed):
     x, y = _make_contam_linear(N=120, frac_out=frac_out, slope=1.5,
                                 intercept=2.0, seed=seed)
     parts = (linear, [d_linear_b, d_linear_m])
-    port_p, port_flags = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, port_flags = _port_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                                     partials=parts, guess=[0.0, 0.0], bulk=True)
-    or_p, or_flags = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, or_flags = _oracle_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                                   partials=parts, guess=[0.0, 0.0], bulk=True)
 
     np.testing.assert_allclose(
@@ -190,7 +190,7 @@ def test_bulk_parametric_parity_lsmode68(frac_out, seed):
         "techniques (LS_MODE_68, LS_MODE_DL, SS_MEDIAN_DL) work correctly "
         "with parametric models, so users should use those. See "
         "benchmarks/es_mode_dl_truth_test.py for the truth-recovery "
-        "comparison and [[rcr2-parity-by-code-path]] memory for details."
+        "comparison and [[pyrcr-parity-by-code-path]] memory for details."
     ),
     strict=True,
 )
@@ -199,9 +199,9 @@ def test_es_mode_dl_parametric_parity():
     x, y = _make_contam_linear(N=150, frac_out=0.10, slope=1.0,
                                 intercept=3.0, seed=2026)
     parts = (linear, [d_linear_b, d_linear_m])
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.ES_MODE_DL,
+    port_p, _ = _port_fit(x, y, pyrcr.RejectionTech.ES_MODE_DL,
                            partials=parts, guess=[0.0, 0.0])
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.ES_MODE_DL,
+    or_p, _ = _oracle_fit(x, y, pyrcr.RejectionTech.ES_MODE_DL,
                            partials=parts, guess=[0.0, 0.0])
     np.testing.assert_allclose(
         port_p, or_p, rtol=RTOL_PARAMS,
@@ -219,9 +219,9 @@ def test_quadratic_parametric_parity():
     parts = (quadratic, [d_quad_a0, d_quad_a1, d_quad_a2])
     # Use a sensible non-zero guess; far-from-truth guesses can derail
     # scipy.optimize.least_squares on quadratics.
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, _ = _port_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.5, 0.0, 0.1])
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, _ = _oracle_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.5, 0.0, 0.1])
     np.testing.assert_allclose(
         port_p, or_p, rtol=RTOL_PARAMS,
@@ -247,10 +247,10 @@ def test_error_bars_parametric_parity():
     y[out_idx] += rng.normal(8.0, 2.0, size=12)
 
     parts = (linear, [d_linear_b, d_linear_m])
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, _ = _port_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0],
                            error_y=sigma_y)
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, _ = _oracle_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0],
                            error_y=sigma_y)
     np.testing.assert_allclose(
@@ -273,9 +273,9 @@ def test_truth_recovery_both_implementations():
                                 intercept=truth[0], seed=7777)
     parts = (linear, [d_linear_b, d_linear_m])
 
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, _ = _port_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0])
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, _ = _oracle_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0])
 
     # Both should recover within ~10% of truth (loose to allow for finite N).
@@ -299,9 +299,9 @@ def test_kept_set_indices_overlap():
                                 intercept=2.0, seed=999)
     parts = (linear, [d_linear_b, d_linear_m])
 
-    _, port_flags = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    _, port_flags = _port_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                                partials=parts, guess=[0.0, 0.0])
-    _, or_flags = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    _, or_flags = _oracle_fit(x, y, pyrcr.RejectionTech.LS_MODE_68,
                                partials=parts, guess=[0.0, 0.0])
 
     port_kept = set(np.where(port_flags)[0])

@@ -1,4 +1,4 @@
-"""Parity test: rcr2 port vs. legacy C++ `rcr` module, LS_MODE_68 path.
+"""Parity test: pyrcr port vs. legacy C++ `rcr` module, LS_MODE_68 path.
 
 Tolerance: rtol=1e-12 (per agents/python_vs_rust_plan.md decisions).
 
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import pyrcr
 
 # Skip cleanly if the oracle isn't installed in this environment.
 rcr_oracle = pytest.importorskip("rcr")
@@ -37,7 +37,7 @@ def _run_oracle(y_list: list[float]) -> dict:
 
 
 def _run_port(y_arr: np.ndarray) -> dict:
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
     r.perform_rejection(y_arr.tolist())
     return {
         "mu": r.result.mu,

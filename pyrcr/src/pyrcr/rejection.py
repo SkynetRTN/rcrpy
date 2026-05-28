@@ -16,7 +16,7 @@ from enum import Enum
 
 import numpy as np
 
-from rcr2 import stats, tables
+from pyrcr import stats, tables
 
 
 # C++ enum equivalents used internally by the loop. The public-facing
@@ -532,7 +532,7 @@ def iterativeLowerSigmaRCR(
         # set into below/above-mu lists. Ties at mu go to BOTH lists; only
         # the LAST tied point's position is reweighted to 0.5 (mirrors a
         # quirk in the C++ that is intentionally preserved for parity —
-        # see rcr2-porting-gotchas memory).
+        # see pyrcr-porting-gotchas memory).
         diff = np.abs(trueY - mu)
         max_local = int(np.argmax(diff))
         max_val = float(diff[max_local])

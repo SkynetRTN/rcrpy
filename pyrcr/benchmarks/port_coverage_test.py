@@ -15,7 +15,7 @@ Blocks:
   F. Edge cases: clean data, single-outlier, very small N.
 
 Run from the repo root:
-    python python/benchmarks/port_coverage_test.py
+    python pyrcr/benchmarks/port_coverage_test.py
 """
 from __future__ import annotations
 

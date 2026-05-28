@@ -1,13 +1,13 @@
-"""rcr2: Robust Chauvenet Rejection, Python reimplementation."""
+"""pyrcr: Robust Chauvenet Rejection, Python reimplementation."""
 
-from rcr2.api import (
+from pyrcr.api import (
     RCR,
     RCRResults,
     RejectionTech,
     MuType,
 )
-from rcr2.nonparametric import NonParametric
-from rcr2.functional import FunctionalForm, FunctionalFormResults, Priors, PriorType
+from pyrcr.nonparametric import NonParametric
+from pyrcr.functional import FunctionalForm, FunctionalFormResults, Priors, PriorType
 
 __all__ = [
     "RCR",

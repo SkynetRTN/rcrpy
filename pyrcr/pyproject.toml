@@ -1,9 +1,9 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
-name = "rcr2"
+name = "pyrcr"
 version = "0.1.0"
 description = "Robust Chauvenet Rejection (RCR), Python reimplementation"
 requires-python = ">=3.11"
@@ -40,14 +40,14 @@ Repository = "https://github.com/nickk124/RCR"
 Issues = "https://github.com/nickk124/RCR/issues"
 Paper = "https://arxiv.org/abs/1807.05276"
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8",
     "rcr>=2.4",
 ]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyrcr"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

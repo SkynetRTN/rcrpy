@@ -3,7 +3,7 @@ ES_MODE_DL + parametric FunctionalForm.
 
 The port and oracle are known to disagree by ~8-20% on this combination
 (see test_es_mode_dl_parametric_parity xfail rationale and the
-[[rcr2-parity-by-code-path]] memory). But disagreement between port and
+[[pyrcr-parity-by-code-path]] memory). But disagreement between port and
 oracle says nothing about which one is *correct*. This test directly
 measures: when port and oracle give different answers, which gets
 closer to the known truth?

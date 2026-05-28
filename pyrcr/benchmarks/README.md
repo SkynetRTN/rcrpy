@@ -1,6 +1,6 @@
-# `rcr2` benchmarks
+# `pyrcr` benchmarks
 
-Standalone scripts for measuring `rcr2` correctness and performance.
+Standalone scripts for measuring `pyrcr` correctness and performance.
 None of these are part of the installed package — they're maintainer
 tools that live alongside the source.
 
@@ -16,11 +16,11 @@ tools that live alongside the source.
 Each script is self-contained. From the repo root:
 
 ```bash
-python python/benchmarks/reflect_parity.py
-python python/benchmarks/diagnostics.py
-python python/benchmarks/diagnostics_functional.py
+python pyrcr/benchmarks/reflect_parity.py
+python pyrcr/benchmarks/diagnostics.py
+python pyrcr/benchmarks/diagnostics_functional.py
 ```
 
-All four require the legacy `rcr` C++ module (the oracle) plus `rcr2`
+All four require the legacy `rcr` C++ module (the oracle) plus `pyrcr`
 itself installed in the active environment — i.e., `pip install -e
 ./python[dev]` covers everything.

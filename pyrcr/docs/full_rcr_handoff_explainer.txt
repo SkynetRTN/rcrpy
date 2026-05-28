@@ -5,7 +5,7 @@ Audience: another Claude instance (or any LLM/developer) integrating full_rcr.py
 into downstream code. Focused on the specific combination LS_MODE_DL + bulk +
 parametric, which is what the integrator is using.
 
-Generated 2026-05-21 from the rcr2 package at this revision.
+Generated 2026-05-21 from the pyrcr package at this revision.
 
 ================================================================================
 1. WHAT "LS_MODE_DL" MEANS

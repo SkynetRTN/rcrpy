@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import pytest
 
-import rcr2
+import pyrcr
 
 
 def test_public_api_present():
-    assert hasattr(rcr2, "RCR")
-    assert hasattr(rcr2, "RCRResults")
-    assert hasattr(rcr2, "RejectionTech")
+    assert hasattr(pyrcr, "RCR")
+    assert hasattr(pyrcr, "RCRResults")
+    assert hasattr(pyrcr, "RejectionTech")
 
-    tech = rcr2.RejectionTech
+    tech = pyrcr.RejectionTech
     assert tech.SS_MEDIAN_DL.value == "SS_MEDIAN_DL"
     assert tech.LS_MODE_68.value == "LS_MODE_68"
     assert tech.LS_MODE_DL.value == "LS_MODE_DL"
@@ -19,17 +19,17 @@ def test_public_api_present():
 
 
 def test_rcr_can_be_constructed():
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
-    assert r.rejection_tech is rcr2.RejectionTech.LS_MODE_68
-    assert isinstance(r.result, rcr2.RCRResults)
+    r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
+    assert r.rejection_tech is pyrcr.RejectionTech.LS_MODE_68
+    assert isinstance(r.result, pyrcr.RCRResults)
 
 
 def test_perform_rejection_runs_for_all_techs():
     """All four rejection techniques are now wired up."""
     data = [0.1, 0.2, 0.0, 0.3, -0.1, -0.2, -0.3, 11.0]
-    for tech in (rcr2.RejectionTech.LS_MODE_68, rcr2.RejectionTech.LS_MODE_DL,
-                 rcr2.RejectionTech.SS_MEDIAN_DL, rcr2.RejectionTech.ES_MODE_DL):
-        r = rcr2.RCR(tech)
+    for tech in (pyrcr.RejectionTech.LS_MODE_68, pyrcr.RejectionTech.LS_MODE_DL,
+                 pyrcr.RejectionTech.SS_MEDIAN_DL, pyrcr.RejectionTech.ES_MODE_DL):
+        r = pyrcr.RCR(tech)
         r.perform_rejection(data)
         assert r.result.flags.size == len(data)
 
@@ -37,8 +37,8 @@ def test_perform_rejection_runs_for_all_techs():
 def test_perform_bulk_rejection_runs_for_all_techs():
     """All four rejection techniques are wired up for bulk too."""
     data = [0.1, 0.2, 0.0, 0.3, -0.1, -0.2, -0.3, 11.0]
-    for tech in (rcr2.RejectionTech.LS_MODE_68, rcr2.RejectionTech.LS_MODE_DL,
-                 rcr2.RejectionTech.SS_MEDIAN_DL, rcr2.RejectionTech.ES_MODE_DL):
-        r = rcr2.RCR(tech)
+    for tech in (pyrcr.RejectionTech.LS_MODE_68, pyrcr.RejectionTech.LS_MODE_DL,
+                 pyrcr.RejectionTech.SS_MEDIAN_DL, pyrcr.RejectionTech.ES_MODE_DL):
+        r = pyrcr.RCR(tech)
         r.perform_bulk_rejection(data)
         assert r.result.flags.size == len(data)

@@ -13,10 +13,10 @@ Setup per trial:
   - Truth: b=2.0, m=1.5
 
 Run with defaults:
-    python python/benchmarks/extreme_contamination_test.py
+    python pyrcr/benchmarks/extreme_contamination_test.py
 
 Override contamination and trial count:
-    python python/benchmarks/extreme_contamination_test.py \\
+    python pyrcr/benchmarks/extreme_contamination_test.py \\
         --contam 0.50 --trials 30
 """
 from __future__ import annotations

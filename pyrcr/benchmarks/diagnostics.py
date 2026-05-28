@@ -4,7 +4,7 @@
   3. Bit-identity of decisions (flags / cleanY)
 
 Run from repository root:
-    python python/diagnostics.py
+    python pyrcr/diagnostics.py
 """
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from pathlib import Path
 import numpy as np
 
 import rcr  # oracle
-import rcr2
+import pyrcr
 
-REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
+REPO = Path(__file__).resolve().parents[2]  # pyrcr/benchmarks/x.py -> repo root
 ASSETS = REPO / "assets" / "test"
 
 
@@ -78,7 +78,7 @@ def run_case(label: str, tech_name: str, dataset: str, weighted: bool, bulk: boo
     d = _load(dataset)
     y = d["y"]
     w_arr = d.get("w")
-    py_tech = getattr(rcr2.RejectionTech, tech_name)
+    py_tech = getattr(pyrcr.RejectionTech, tech_name)
     oc_tech = getattr(rcr, tech_name)
 
     def run_oracle():
@@ -92,7 +92,7 @@ def run_case(label: str, tech_name: str, dataset: str, weighted: bool, bulk: boo
         return o
 
     def run_port():
-        p = rcr2.RCR(py_tech)
+        p = pyrcr.RCR(py_tech)
         method = p.perform_bulk_rejection if bulk else p.perform_rejection
         if weighted:
             method(y.tolist(), w=w_arr.tolist())

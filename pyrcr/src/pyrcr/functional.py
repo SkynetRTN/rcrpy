@@ -205,7 +205,7 @@ class FunctionalForm:
     Use with::
 
         model = FunctionalForm(linear, xdata, ydata, [d1, d2], guess)
-        r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+        r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
         r.set_parametric_model(model)
         r.perform_rejection(ydata)
         best = model.result.parameters
@@ -905,7 +905,7 @@ class FunctionalForm:
         current parameterSpace. Stores the result as the new
         meanstartingpoint for the subsequent generalized-mean call.
         """
-        from rcr2 import stats as _stats
+        from pyrcr import stats as _stats
         params = np.empty(self.M, dtype=np.float64)
         for k in range(self.M):
             arr = self.parameterSpace[k]
@@ -926,7 +926,7 @@ class FunctionalForm:
         modal window, filtering combos to those within ALL dimensions'
         windows, until the windows stabilize. Returns the weighted median
         of the final filtered combos per parameter."""
-        from rcr2 import stats as _stats
+        from pyrcr import stats as _stats
         if any(arr.size == 0 for arr in self.parameterSpace):
             return self.parameters.copy()
 

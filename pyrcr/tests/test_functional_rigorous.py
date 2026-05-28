@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import pyrcr
 
 
 # ---- shared model helpers --------------------------------------------------
@@ -50,7 +50,7 @@ def test_median_mu_tech_uses_combo_space():
     x, y = _make_linear_with_outliers(N=80, n_outliers=30, seed=42)
     truth = np.array([2.0, 1.5])
 
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0])
     assert model._is_linear_in_params  # vectorized fast path
     model.set_true_vec(np.ones(x.size, dtype=bool), y)
@@ -79,7 +79,7 @@ def test_mode_mu_tech_uses_combo_space():
     x, y = _make_linear_with_outliers(N=80, n_outliers=30, seed=7)
     truth = np.array([2.0, 1.5])
 
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0])
     model.set_true_vec(np.ones(x.size, dtype=bool), y)
     model.build_model_space(build_combos=True)
@@ -101,7 +101,7 @@ def test_parameter_space_populated_for_median_path():
     """Verify that build_model_space(build_combos=True) actually fills
     parameterSpace and weightSpace with the expected number of entries."""
     x, y = _make_linear_with_outliers(N=20, n_outliers=4, seed=1)
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0])
     model.set_true_vec(np.ones(x.size, dtype=bool), y)
     model.build_model_space(build_combos=True)
@@ -116,18 +116,18 @@ def test_parameter_space_populated_for_median_path():
 # ---- cross-tech coverage ---------------------------------------------------
 
 @pytest.mark.parametrize("tech", [
-    rcr2.RejectionTech.LS_MODE_68,
-    rcr2.RejectionTech.LS_MODE_DL,
-    rcr2.RejectionTech.SS_MEDIAN_DL,
-    rcr2.RejectionTech.ES_MODE_DL,
+    pyrcr.RejectionTech.LS_MODE_68,
+    pyrcr.RejectionTech.LS_MODE_DL,
+    pyrcr.RejectionTech.SS_MEDIAN_DL,
+    pyrcr.RejectionTech.ES_MODE_DL,
 ])
 def test_functional_form_works_with_each_rejection_tech(tech):
     """All four rejection techs should run end-to-end with a PARAMETRIC
     model and return finite, sensible parameters."""
     x, y = _make_linear_with_outliers(N=60, n_outliers=15, seed=11)
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0])
-    r = rcr2.RCR(tech)
+    r = pyrcr.RCR(tech)
     r.set_parametric_model(model)
     r.perform_rejection(y.tolist())
 
@@ -155,9 +155,9 @@ def test_weighted_functional_form_runs():
     w = np.ones(N)
     w[out] = 0.05
 
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0], weights=w)
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
     r.set_parametric_model(model)
     r.perform_rejection(y.tolist(), w=w.tolist())
 
@@ -176,7 +176,7 @@ def test_n_equal_m_single_combo():
     # M=2 linear, 2 data points.
     x = np.array([0.0, 1.0])
     y = np.array([3.0, 5.0])
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0])
     model.set_true_vec(np.array([True, True]), y)
     model.build_model_space(build_combos=True)
@@ -194,9 +194,9 @@ def test_small_n_just_above_m():
     x = np.array([0.0, 1.0, 2.0, 3.0])
     y = 1.0 + 2.0 * x + rng.normal(0, 0.1, size=4)
 
-    model = rcr2.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
+    model = pyrcr.FunctionalForm(linear, x, y, [d_linear_b, d_linear_m],
                                  guess=[0.0, 0.0])
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
     r.set_parametric_model(model)
     r.perform_rejection(y.tolist())
     assert np.all(np.isfinite(model.result.parameters))
@@ -221,7 +221,7 @@ def test_nonlinear_in_params_falls_back_to_fsolve():
     x = np.linspace(0, 1, 12)
     y = 2.0 * np.exp(0.5 * x) + rng.normal(0, 0.02, size=x.size)
 
-    model = rcr2.FunctionalForm(exp_model, x, y, [d_exp_a, d_exp_b],
+    model = pyrcr.FunctionalForm(exp_model, x, y, [d_exp_a, d_exp_b],
                                  guess=[1.0, 0.3])
     # Detector should flag this as NOT linear in params.
     assert model._is_linear_in_params is False

@@ -7,13 +7,13 @@ RCR is what you want.
 ## The four rejection techniques
 
 ```python
-import rcr2
+import pyrcr
 
 # Pick one based on your data:
-rcr2.RejectionTech.LS_MODE_68    # Symmetric uncontaminated, one-sided contaminants
-rcr2.RejectionTech.LS_MODE_DL    # Mixed one-sided + two-sided contaminants
-rcr2.RejectionTech.SS_MEDIAN_DL  # Symmetric uncontaminated, two-sided contaminants
-rcr2.RejectionTech.ES_MODE_DL    # Mildly asymmetric / very small N
+pyrcr.RejectionTech.LS_MODE_68    # Symmetric uncontaminated, one-sided contaminants
+pyrcr.RejectionTech.LS_MODE_DL    # Mixed one-sided + two-sided contaminants
+pyrcr.RejectionTech.SS_MEDIAN_DL  # Symmetric uncontaminated, two-sided contaminants
+pyrcr.RejectionTech.ES_MODE_DL    # Mildly asymmetric / very small N
 ```
 
 See section 3 of [Maples et al. 2018](https://arxiv.org/abs/1807.05276)
@@ -23,7 +23,7 @@ for a decision tree.
 
 ```python
 import numpy as np
-import rcr2
+import pyrcr
 
 # Some data: clean Gaussian + heavy one-sided contamination
 rng = np.random.default_rng(42)
@@ -32,7 +32,7 @@ y = np.concatenate([
     np.abs(rng.normal(0, 10, size=850)),
 ])
 
-r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
 r.perform_rejection(y.tolist())
 
 print(f"mu       = {r.result.mu:.3f}")
@@ -48,7 +48,7 @@ time — substantially faster, with the same final result for well-behaved
 data:
 
 ```python
-r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
 r.perform_bulk_rejection(y.tolist())
 # Same r.result fields, plus rejectedY / originalY / stDevTotal which
 # the bulk path populates via the C++'s setFinalVectors equivalent.
@@ -62,7 +62,7 @@ Pass per-point weights:
 weights = np.ones(y.size)
 weights[some_indices] = 0.5   # downweight some points
 
-r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
 r.perform_rejection(y.tolist(), w=weights.tolist())
 ```
 
@@ -86,6 +86,6 @@ dataclass with:
 
 ## Performance
 
-`rcr2` runs single-value RCR at roughly **10× the C++ implementation's
+`pyrcr` runs single-value RCR at roughly **10× the C++ implementation's
 runtime** on large datasets (N=1000). Reproduce with
 [`../benchmarks/diagnostics.py`](../benchmarks/diagnostics.py).

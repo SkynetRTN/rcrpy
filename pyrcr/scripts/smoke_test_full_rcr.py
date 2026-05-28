@@ -1,6 +1,6 @@
 """End-to-end smoke test of the standalone `full_rcr.py`.
 
-Imports it directly (no rcr2 package needed), runs both single-value
+Imports it directly (no pyrcr package needed), runs both single-value
 and functional-form quick-starts, and verifies the results are sensible.
 Designed to be run in a sterile venv with only numpy + scipy.
 """
@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Make full_rcr.py importable: it lives one level up from this script
-# (python/full_rcr.py, while this is python/scripts/smoke_test_full_rcr.py).
+# (pyrcr/full_rcr.py, while this is pyrcr/scripts/smoke_test_full_rcr.py).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np

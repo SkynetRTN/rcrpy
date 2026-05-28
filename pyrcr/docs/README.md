@@ -1,6 +1,6 @@
-# rcr2 documentation
+# pyrcr documentation
 
-Pragmatic markdown docs for `rcr2`. For the deeper science see
+Pragmatic markdown docs for `pyrcr`. For the deeper science see
 [Maples et al. 2018](https://arxiv.org/abs/1807.05276); for the original
 C++/pybind11 implementation see the Sphinx site under
 [`../../cpp/docs/`](../../cpp/docs/).
@@ -17,7 +17,7 @@ C++/pybind11 implementation see the Sphinx site under
 
 ## Reference
 
-The public API is exported from `rcr2`:
+The public API is exported from `pyrcr`:
 
 | Symbol | What |
 |---|---|

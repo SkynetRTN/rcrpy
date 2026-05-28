@@ -1,4 +1,4 @@
-# rcr2
+# pyrcr
 
 Python reimplementation of Robust Chauvenet Rejection (RCR) — statistical
 outlier rejection that stays accurate on samples that are >85% contaminated.
@@ -12,7 +12,7 @@ while running pure Python — no compiler toolchain required.
 ## Install
 
 ```bash
-pip install rcr2
+pip install pyrcr
 ```
 
 Runtime deps: `numpy>=1.26`, `scipy>=1.11`. Python ≥3.11.
@@ -25,7 +25,7 @@ Reject outliers from a 1-D dataset and recover the underlying central
 value and width.
 
 ```python
-import rcr2
+import pyrcr
 import numpy as np
 
 # Heavily contaminated data: mu=0, sigma=1, plus one-sided outliers
@@ -35,7 +35,7 @@ y = np.concatenate([
     np.abs(rng.normal(0, 10, size=850)),       # 85% contamination
 ])
 
-r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
 r.perform_rejection(y.tolist())
 
 print(f"Recovered mu     = {r.result.mu:.3f}    (truth: 0)")
@@ -48,7 +48,7 @@ print(f"Points kept      = {r.result.flags.sum()} / {len(y)}")
 Fit a parametric model to (x, y) data while rejecting outliers.
 
 ```python
-import rcr2
+import pyrcr
 import numpy as np
 
 # Linear data with outliers
@@ -68,10 +68,10 @@ def d_linear_b(x, params):
 def d_linear_m(x, params):
     return x
 
-model = rcr2.FunctionalForm(
+model = pyrcr.FunctionalForm(
     linear, x, y, [d_linear_b, d_linear_m], guess=[0.0, 0.0],
 )
-r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+r = pyrcr.RCR(pyrcr.RejectionTech.LS_MODE_68)
 r.set_parametric_model(model)
 r.perform_rejection(y.tolist())
 
@@ -110,8 +110,8 @@ See [agents/python_vs_rust_plan.md](../agents/python_vs_rust_plan.md) and
 |---|---|
 | Bulk rejection (faster on large N) | `r.perform_bulk_rejection(y)` |
 | Weighted RCR | `r.perform_rejection(y, w=weights)` |
-| User-defined "candidate" mu | subclass `rcr2.NonParametric`, `r.set_non_parametric_model(model)` |
-| Add Gaussian / bounded priors | `rcr2.Priors(prior_type=..., gaussian_params=...)` → pass via `priors=` to `FunctionalForm` |
+| User-defined "candidate" mu | subclass `pyrcr.NonParametric`, `r.set_non_parametric_model(model)` |
+| Add Gaussian / bounded priors | `pyrcr.Priors(prior_type=..., gaussian_params=...)` → pass via `priors=` to `FunctionalForm` |
 | Pivot search for power-law / exponential fits | pass `pivot_function=...` and `pivot_guess=...` to `FunctionalForm` |
 | ND independent variable | pass `xdata` as `(N, D)` array; user functions take vector `x` |
 
@@ -135,7 +135,7 @@ python/
 ├── pyproject.toml
 ├── README.md             (you are here)
 ├── LICENSE               (mirrors ../cpp/LICENSE — academic / non-commercial)
-├── src/rcr2/
+├── src/pyrcr/
 │   ├── __init__.py       public API re-exports
 │   ├── api.py            RCR class, RCRResults, RejectionTech, MuType
 │   ├── stats.py          median, halfSampleMode, robust-sigma helpers
@@ -151,7 +151,7 @@ python/
 
 ## Citing
 
-If you use `rcr2` in academic work, please cite the original paper:
+If you use `pyrcr` in academic work, please cite the original paper:
 
 ```bibtex
 @article{maples2018robust,
