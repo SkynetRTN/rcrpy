@@ -10,10 +10,11 @@ requires-python = ">=3.11"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
-    {name = "Haislip", email = "haislip@physics.unc.edu"},
+    {name = "Reece Clark", email = "reececar@unc.edu"},
+    {name = "Ruide Fu", email = "rdfu@unc.edu"},
 ]
 maintainers = [
-    {name = "UNC Physics RCR successors", email = "haislip@physics.unc.edu"},
+    {name = "Ruide Fu", email = "rdfu@unc.edu"},
 ]
 keywords = ["statistics", "outlier-rejection", "robust-statistics", "astronomy", "chauvenet"]
 classifiers = [
@@ -35,9 +36,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nickk124/RCR"
-Repository = "https://github.com/nickk124/RCR"
-Issues = "https://github.com/nickk124/RCR/issues"
+Homepage = "https://github.com/SkynetRTN/robust-chauvenet-rejection"
+Repository = "https://github.com/SkynetRTN/robust-chauvenet-rejection"
+Issues = "https://github.com/SkynetRTN/robust-chauvenet-rejection/issues"
 Paper = "https://arxiv.org/abs/1807.05276"
 
 [dependency-groups]
