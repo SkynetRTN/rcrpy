@@ -43,10 +43,10 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SkynetRTN/robust-chauvenet-rejection"
-Repository = "https://github.com/SkynetRTN/robust-chauvenet-rejection"
+Homepage = "https://github.com/SkynetRTN/rcrpy"
+Repository = "https://github.com/SkynetRTN/rcrpy"
 Documentation = "https://rcrpy.readthedocs.io/"
-Issues = "https://github.com/SkynetRTN/robust-chauvenet-rejection/issues"
+Issues = "https://github.com/SkynetRTN/rcrpy/issues"
 Paper = "https://arxiv.org/abs/1807.05276"
 
 [dependency-groups]
