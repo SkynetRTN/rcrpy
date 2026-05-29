@@ -35,9 +35,17 @@ dependencies = [
     "scipy>=1.11",
 ]
 
+[project.optional-dependencies]
+docs = [
+    "sphinx>=7",
+    "furo",
+    "myst-parser",
+]
+
 [project.urls]
 Homepage = "https://github.com/SkynetRTN/robust-chauvenet-rejection"
 Repository = "https://github.com/SkynetRTN/robust-chauvenet-rejection"
+Documentation = "https://rcrpy.readthedocs.io/"
 Issues = "https://github.com/SkynetRTN/robust-chauvenet-rejection/issues"
 Paper = "https://arxiv.org/abs/1807.05276"
 

@@ -60,6 +60,54 @@ git push origin vx.y.z
 # 9. Create a GitHub Release attached to that tag.
 ```
 
+## Documentation (Sphinx + Read the Docs)
+
+The docs live in `rcrpy/docs/` (Sphinx + MyST Markdown, `furo` theme) and are
+built and hosted automatically by [Read the Docs](https://rcrpy.readthedocs.io/).
+The build config is `.readthedocs.yaml` at the repository root; the Sphinx
+config is `rcrpy/docs/conf.py`. The `docs` extra in `pyproject.toml` pins the
+build dependencies (`sphinx`, `furo`, `myst-parser`).
+
+### Build & preview locally
+
+From the **rcrpy** directory:
+
+```bash
+# Build the HTML site (installs the docs extra into the env on first run).
+uv run --extra docs sphinx-build -b html docs docs/_build/html
+
+# Open it.
+open docs/_build/html/index.html        # macOS
+# xdg-open docs/_build/html/index.html   # Linux
+
+# Stricter pre-release check: fail on any warning (use once warnings are clean).
+uv run --extra docs sphinx-build -b html -W --keep-going docs docs/_build/html
+```
+
+(From the repo root instead, add `--project rcrpy` and use the full paths:
+`uv run --project rcrpy --extra docs sphinx-build -b html rcrpy/docs rcrpy/docs/_build/html`.)
+
+The `docs/_build/` and `docs/generated/` output directories are git-ignored.
+
+### How it deploys
+
+You don't upload docs by hand — Read the Docs rebuilds them on its own:
+
+- **Every push to `main`** rebuilds the `latest` docs (via the RTD webhook).
+- **Every release tag** (`vX.Y.Z`, step 8 above) builds a versioned copy, as
+  long as the "build on new tag" Automation Rule is enabled in the RTD admin.
+
+So once you push the release tag, the matching docs version publishes
+automatically. Watch the **Builds** tab of the
+[Read the Docs project](https://app.readthedocs.org/) to confirm it succeeded.
+
+### Adding a page
+
+Drop a new `.md` (or `.rst`) file in `rcrpy/docs/` and add its name (without the
+extension) to a `toctree` in `rcrpy/docs/index.md`. The API reference in
+`rcrpy/docs/api.md` is generated from the package's public docstrings, so new
+public classes/functions show up there automatically.
+
 ## Version-bump conventions
 
 `rcrpy` follows [semver](https://semver.org):
