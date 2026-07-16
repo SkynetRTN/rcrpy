@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for rcr2 tests."""
+"""Shared pytest fixtures for rcrpy tests."""
 from __future__ import annotations
 
 import csv

@@ -1,4 +1,4 @@
-"""Wall-clock + precision comparison for FunctionalForm fits — rcr2 vs
+"""Wall-clock + precision comparison for FunctionalForm fits — rcrpy vs
 C++ oracle.
 
 For each case, both implementations run RCR + LS_MODE_68 with the same
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 import rcr   # oracle
-import rcr2
+import rcrpy
 
 REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
 ASSETS = REPO / "assets" / "test"
@@ -62,7 +62,7 @@ def case_linear_fit_no_rcr(N: int, label: str):
     y = 1.0 + 2.0 * x + rng.normal(0, 0.5, size=x.size)
 
     def run_port():
-        m = rcr2.FunctionalForm(linear, x, y, [d_lin0, d_lin1], guess=[0.0, 0.0])
+        m = rcrpy.FunctionalForm(linear, x, y, [d_lin0, d_lin1], guess=[0.0, 0.0])
         m.regression()
         return m.parameters
 
@@ -86,8 +86,8 @@ def case_linear_fit_no_rcr(N: int, label: str):
 
 def case_linear_rcr(label: str, x, y):
     def run_port():
-        m = rcr2.FunctionalForm(linear, x, y, [d_lin0, d_lin1], guess=[0.0, 1.0])
-        r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+        m = rcrpy.FunctionalForm(linear, x, y, [d_lin0, d_lin1], guess=[0.0, 1.0])
+        r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
         r.set_parametric_model(m)
         r.perform_rejection(y.tolist())
         return m.result.parameters
@@ -128,7 +128,7 @@ def case_nd_fit(N: int, label: str):
         return xv[1]
 
     def run_port():
-        m = rcr2.FunctionalForm(f_nd, x, y, [d0, d1, d2], guess=[0.0, 0.0, 0.0])
+        m = rcrpy.FunctionalForm(f_nd, x, y, [d0, d1, d2], guess=[0.0, 0.0, 0.0])
         m.regression()
         return m.parameters
 

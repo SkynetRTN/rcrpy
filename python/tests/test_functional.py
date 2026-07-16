@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 REPO = Path(__file__).resolve().parents[2]
 LINEAR_CSV = REPO / "assets" / "test" / "data_linear.csv"
@@ -62,7 +62,7 @@ def test_functional_form_constructs_and_fits_clean():
     x = np.linspace(-5, 5, 50)
     y = true_b + true_m * x + rng.normal(0, 0.01, size=x.size)
 
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         linear_model, x, y,
         [d_linear_intercept, d_linear_slope],
         guess=[0.0, 0.0],
@@ -86,14 +86,14 @@ def test_rcr_with_parametric_runs_on_linear_dataset():
     parity awaits porting get2DMedian / get2DMode."""
     x, y = _load_linear()
 
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         linear_model, x, y,
         [d_linear_intercept, d_linear_slope],
         guess=[0.0, 1.0],
     )
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r.set_parametric_model(model)
-    assert r.mu_type is rcr2.MuType.PARAMETRIC
+    assert r.mu_type is rcrpy.MuType.PARAMETRIC
 
     r.perform_rejection(y.tolist())
 
@@ -124,10 +124,10 @@ def test_functional_form_parity_on_data_linear():
     rcr_oracle = pytest.importorskip("rcr")
     x, y = _load_linear()
 
-    port_model = rcr2.FunctionalForm(
+    port_model = rcrpy.FunctionalForm(
         linear_model, x, y, [d_linear_intercept, d_linear_slope], guess=[0.0, 1.0],
     )
-    r_port = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r_port = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r_port.set_parametric_model(port_model)
     r_port.perform_rejection(y.tolist())
 
@@ -148,13 +148,13 @@ def test_functional_form_parity_on_data_linear():
 def test_pivot_static_class_attribute():
     """The `pivot` static-on-class attribute mirrors the C++ static
     `FunctionalForm::pivot` so user model functions can reference it."""
-    assert hasattr(rcr2.FunctionalForm, "pivot")
-    old = rcr2.FunctionalForm.pivot
+    assert hasattr(rcrpy.FunctionalForm, "pivot")
+    old = rcrpy.FunctionalForm.pivot
     try:
-        rcr2.FunctionalForm.pivot = 2.5
-        assert rcr2.FunctionalForm.pivot == 2.5
+        rcrpy.FunctionalForm.pivot = 2.5
+        assert rcrpy.FunctionalForm.pivot == 2.5
     finally:
-        rcr2.FunctionalForm.pivot = old
+        rcrpy.FunctionalForm.pivot = old
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ def test_parameter_uncertainties_populated():
     rng = np.random.default_rng(7)
     x = np.linspace(-5, 5, 100)
     y = 1.0 + 2.0 * x + rng.normal(0, 0.5, size=x.size)
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         linear_model, x, y, [d_linear_intercept, d_linear_slope],
         guess=[0.0, 0.0],
     )
@@ -193,18 +193,18 @@ def test_priors_gaussian_pulls_fit_toward_mean():
     y = 0.0 + 1.0 * x + rng.normal(0, 0.3, size=x.size)  # true b=0, m=1
 
     # Baseline: no prior
-    base = rcr2.FunctionalForm(linear_model, x, y,
+    base = rcrpy.FunctionalForm(linear_model, x, y,
                                 [d_linear_intercept, d_linear_slope],
                                 guess=[0.0, 0.0])
     base.regression()
     b_base = base.parameters[0]
 
     # Strong Gaussian prior on intercept at mu=5.0 sigma=0.1
-    pri = rcr2.Priors(
-        prior_type=rcr2.PriorType.GAUSSIAN,
+    pri = rcrpy.Priors(
+        prior_type=rcrpy.PriorType.GAUSSIAN,
         gaussian_params=[[5.0, 0.1], [float("nan"), float("nan")]],
     )
-    with_prior = rcr2.FunctionalForm(linear_model, x, y,
+    with_prior = rcrpy.FunctionalForm(linear_model, x, y,
                                       [d_linear_intercept, d_linear_slope],
                                       guess=[0.0, 0.0], priors=pri)
     with_prior.regression()
@@ -222,12 +222,12 @@ def test_priors_constrained_clamps_parameter():
     x = np.linspace(0, 10, 50)
     y = 0.0 + 1.0 * x + rng.normal(0, 0.2, size=x.size)  # true m=1
 
-    pri = rcr2.Priors(
-        prior_type=rcr2.PriorType.CONSTRAINED,
+    pri = rcrpy.Priors(
+        prior_type=rcrpy.PriorType.CONSTRAINED,
         # Force slope into [0, 0.3] — well below the true 1.0
         param_bounds=[[float("nan"), float("nan")], [0.0, 0.3]],
     )
-    model = rcr2.FunctionalForm(linear_model, x, y,
+    model = rcrpy.FunctionalForm(linear_model, x, y,
                                  [d_linear_intercept, d_linear_slope],
                                  guess=[0.0, 0.1], priors=pri)
     model.regression()
@@ -247,7 +247,7 @@ def test_pivot_search_updates_static_pivot():
 
     x = np.linspace(-3, 7, 40)
     y = x * 2.0
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         linear_model, x, y, [d_linear_intercept, d_linear_slope],
         guess=[0.0, 1.0],
         pivot_function=pivot_mean,
@@ -255,19 +255,19 @@ def test_pivot_search_updates_static_pivot():
     )
     assert model.has_custom_pivot
     # Initial pivot from pivot_guess.
-    assert rcr2.FunctionalForm.pivot == 0.0
+    assert rcrpy.FunctionalForm.pivot == 0.0
     # build_model_space recomputes pivot from current x window.
     model.indices = np.arange(x.size, dtype=np.int64)
     model.parameters = np.array([0.0, 1.0])
     model.build_model_space()
     expected = float(np.mean(x))
-    assert abs(rcr2.FunctionalForm.pivot - expected) < 1e-9
+    assert abs(rcrpy.FunctionalForm.pivot - expected) < 1e-9
     # Reset so other tests aren't perturbed.
-    rcr2.FunctionalForm.pivot = 0.0
+    rcrpy.FunctionalForm.pivot = 0.0
 
 
 def test_functional_form_runs_on_data_exponential():
-    """Smoke test: rcr2 + LS_MODE_68 + exponential FunctionalForm on
+    """Smoke test: rcrpy + LS_MODE_68 + exponential FunctionalForm on
     data_exponential.csv. The exponential `a0 * 10^(a1*x)` model is
     poorly conditioned without bounds, so we use CONSTRAINED priors on
     a1 to bound the solver (doubles as a cross-feature test of
@@ -276,7 +276,7 @@ def test_functional_form_runs_on_data_exponential():
     step-damping; that parity check can be added when get2DMedian /
     get2DMode are ported."""
     x, y = _load_csv_xy(EXPONENTIAL_CSV)
-    rcr2.FunctionalForm.pivot = 0.0
+    rcrpy.FunctionalForm.pivot = 0.0
 
     def expo(x, params):
         # Clip exponent to keep the callback returning finite numbers
@@ -294,13 +294,13 @@ def test_functional_form_runs_on_data_exponential():
     def d_expo_a1(x, params):
         return expo(x, params) * x * np.log(10)
 
-    bounded = rcr2.Priors(
-        prior_type=rcr2.PriorType.CONSTRAINED,
+    bounded = rcrpy.Priors(
+        prior_type=rcrpy.PriorType.CONSTRAINED,
         param_bounds=[[float("nan"), float("nan")], [-5.0, 5.0]],
     )
-    model = rcr2.FunctionalForm(expo, x, y, [d_expo_a0, d_expo_a1],
+    model = rcrpy.FunctionalForm(expo, x, y, [d_expo_a0, d_expo_a1],
                                  guess=[16.0, 0.0], priors=bounded)
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r.set_parametric_model(model)
     r.perform_rejection(y.tolist())
 
@@ -334,7 +334,7 @@ def test_nd_xdata_runs_through_regression():
     def d2(xv, params):
         return xv[1]
 
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         f_nd, x, y, [d0, d1, d2], guess=[0.0, 0.0, 0.0],
     )
     assert model.ND_check is True

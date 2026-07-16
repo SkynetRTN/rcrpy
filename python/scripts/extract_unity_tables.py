@@ -1,5 +1,5 @@
 """One-shot extractor: pull the unity tables from cpp/src/RCR.cpp into
-src/rcr2/tables.py as numpy arrays.
+src/rcrpy/tables.py as numpy arrays.
 
 The C++ `RCR::loadUnityTables()` function (cpp/src/RCR.cpp, ~lines 1564-4996)
 contains ~3400 lines of hand-written float literal assignments into eight
@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SRC_CPP = REPO / "cpp" / "src" / "RCR.cpp"
-DEST_PY = REPO / "python" / "src" / "rcr2" / "tables.py"
+DEST_PY = REPO / "python" / "src" / "rcrpy" / "tables.py"
 
 EXPECTED_SIZES: dict[str, int] = {
     "ESUnity": 1001,

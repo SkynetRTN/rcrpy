@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rcr2"
+name = "rcrpy"
 version = "0.1.0"
 description = "Robust Chauvenet Rejection (RCR), Python reimplementation"
 requires-python = ">=3.11"
@@ -44,6 +44,11 @@ Paper = "https://arxiv.org/abs/1807.05276"
 dev = [
     "pytest>=8",
     "rcr>=2.4",
+]
+# Optional Numba JIT acceleration of the DL-sigma kernels (rcrpy.enable_fast()).
+# Pure-Python remains the bit-exact default; this only adds speed.
+fast = [
+    "numba>=0.59",
 ]
 
 [tool.setuptools.packages.find]

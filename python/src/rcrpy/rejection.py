@@ -12,11 +12,34 @@ Ported from cpp/src/RCR.cpp:
 """
 from __future__ import annotations
 
+import math
 from enum import Enum
 
 import numpy as np
 
-from rcr2 import stats, tables
+from rcrpy import stats, tables
+
+
+def _pow10pow10(z: float) -> float:
+    """``10**(10**z)`` with C++ ``pow`` IEEE overflow semantics (overflow ->
+    +inf) instead of Python's OverflowError.
+
+    The weighted CF/FN models below (getLowerFN_w, getLower68CF_w, ...) all use
+    this double-exponential. For large ``z`` the C++ ``pow(10, pow(10, z))``
+    silently overflows to +inf, and the ``y1 * (...)`` / ``y1 / (...)`` forms
+    then go to +inf / 0 — which the downstream ``delta_chi_squared < FN``
+    selection in stats.fitDL_w handles. Python instead raises OverflowError on
+    the scalar ``10 ** ...``, so reproduce the IEEE result. Same C++-IEEE-vs-
+    Python-raise guard already used in stats.erfcCustom and _reject_ratio.
+    """
+    try:
+        inner = 10.0 ** z
+    except OverflowError:
+        return math.inf
+    try:
+        return 10.0 ** inner
+    except OverflowError:
+        return math.inf
 
 
 # C++ enum equivalents used internally by the loop. The public-facing
@@ -46,6 +69,26 @@ class SigmaChoice(Enum):
 # ratio is astronomically large and the worst-residual point on that side
 # gets rejected, identical to what the C++ does.
 _SIGMA_FLOOR = float(np.finfo(np.float64).tiny)
+
+
+def _reject_ratio(max_val: float, sigma: float) -> float:
+    """Compute the rejection ratio ``max_val / sigma`` with the degenerate-
+    sigma guard the C++ gets for free from IEEE float division.
+
+    When the kept set has no spread left to reject on — perfectly linear or
+    near-constant data, so sigma collapses to 0 — the C++ evaluates
+    ``max / 0`` as +inf (or NaN when max is 0 too) and the short-circuit in
+    reject() (erfcCustom(inf) == 0, or distinctValuesCheck == false) stops
+    the loop with nothing rejected. Python raises ZeroDivisionError on the
+    scalar divide instead, so floor sigma to the smallest positive double —
+    the same _SIGMA_FLOOR idiom the each-sigma loops already use — which
+    overflows the ratio to +inf and yields the identical reject decision.
+
+    Net effect on a line fit: with no outliers to reject, RCR keeps every
+    point and the parametric result reduces to the plain (weighted) least-
+    squares line, instead of crashing.
+    """
+    return max_val / (sigma if sigma > 0 else _SIGMA_FLOOR)
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +137,7 @@ def getLower68CF_w(n: int, w: np.ndarray) -> float:
     else:
         b1 = 1.4154 + sign * 0.363528
         a1 = -0.5408 * logn - 0.6482
-    return y1 * 10 ** (10 ** (a1 + b1 * logx))
+    return y1 * _pow10pow10(a1 + b1 * logx)
 
 
 def getLowerDLCF(n: int) -> float:
@@ -136,7 +179,7 @@ def getLowerDLCF_w(n: int, w: np.ndarray) -> float:
     else:
         b1 = 2.988077 + sign * 0.753032
         a1 = -0.4282 * logn - 0.4412
-    return y1 * 10 ** (10 ** (a1 + b1 * logx))
+    return y1 * _pow10pow10(a1 + b1 * logx)
 
 
 def getSingleDLCF(n: int) -> float:
@@ -160,19 +203,19 @@ def getSingleDLCF_w(n: int, w: np.ndarray) -> float:
     logn = _math.log10(n)
     if n == 2:
         b1, a1 = 0.273907084639124, -3.15279135630884
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 3:
         b1, a1 = 0.448654915529039, -1.19134294551807
-        return y1 / 10 ** (10 ** (a1 + b1 * logx))
+        return y1 / _pow10pow10(a1 + b1 * logx)
     if n == 4:
         b1, a1 = 3.38253309393705, -1.05087405984868
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 5:
         b1, a1 = 0.118507989164207, -1.41453721585464
-        return y1 / 10 ** (10 ** (a1 + b1 * logx))
+        return y1 / _pow10pow10(a1 + b1 * logx)
     b1 = 0.1196 * logn + 4.5073
     a1 = -0.7914 * logn + 0.0243
-    return y1 * 10 ** (10 ** (a1 + b1 * logx))
+    return y1 * _pow10pow10(a1 + b1 * logx)
 
 
 def getSingleFN(n: int, x: np.ndarray) -> float:
@@ -197,7 +240,7 @@ def getSingleFN_w(n: int, x: np.ndarray, w: np.ndarray) -> float:
     if 3 < n < 8:
         a1 = float(tables.SSConstants[0, n])
         b1 = float(tables.SSConstants[1, n])
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if 7 < n < 1001:
         b1 = (-0.3556 * logn ** 6 + 3.7036 * logn ** 5 - 14.932 * logn ** 4
               + 29.176 * logn ** 3 - 28.81 * logn ** 2 + 14.397 * logn - 2.6451)
@@ -205,7 +248,7 @@ def getSingleFN_w(n: int, x: np.ndarray, w: np.ndarray) -> float:
         a1 = (0.2313 * logn ** 6 - 3.02 * logn ** 5 + 15.997 * logn ** 4
               - 43.713 * logn ** 3 + 64.629 * logn ** 2 - 49.976 * logn + 15.484
               + sign * 0.1513 * n ** -0.471)
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n > 1000:
         return y1
     return -999999.0
@@ -245,7 +288,7 @@ def getEachDLCF_w(n: int, w: np.ndarray) -> float:
     else:
         b1 = 1.4123 * logn - 0.3893
         a1 = -0.5989 * logn - 0.6097
-    return y1 * 10 ** (10 ** (a1 + b1 * logx))
+    return y1 * _pow10pow10(a1 + b1 * logx)
 
 
 def getEachFN(n: int, x: np.ndarray) -> float:
@@ -269,13 +312,13 @@ def getEachFN_w(n: int, x: np.ndarray, w: np.ndarray) -> float:
     logn = _math.log10(n)
     if n == 5:
         b1, a1 = 2.13417275654528, -0.466431459550531
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 6:
         b1, a1 = 1.0196951775215, -0.312373723591738
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 7:
         b1, a1 = 0.579724747519776, -0.750190463040497
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if 7 < n < 1001:
         b1 = (5.8718 * logn ** 4 - 47.049 * logn ** 3 + 131.12 * logn ** 2
               - 150.24 * logn + 61.727)
@@ -284,10 +327,10 @@ def getEachFN_w(n: int, x: np.ndarray, w: np.ndarray) -> float:
         b2 = -2.7584 * logn ** 2 + 17.078 * logn - 24.602
         a2 = -1.8953 * logn ** 2 + 11.745 * logn - 19.36
         if n < 191 or (n < 306 and (a1 + b1 * logx > a2 + b2 * logx)):
-            return y1 * 10 ** (10 ** (a1 + b1 * logx))
-        return y1 / 10 ** (10 ** (a2 + b2 * logx))
+            return y1 * _pow10pow10(a1 + b1 * logx)
+        return y1 / _pow10pow10(a2 + b2 * logx)
     b1, a1 = 1.8064, -1.1827
-    return y1 / 10 ** (10 ** (a1 + b1 * logx))
+    return y1 / _pow10pow10(a1 + b1 * logx)
 
 
 def getLowerFN(n: int, x: np.ndarray) -> float:
@@ -312,16 +355,16 @@ def getLowerFN_w(n: int, x: np.ndarray, w: np.ndarray) -> float:
     if n == 5:
         y1 = 36.8534
         b1, a1 = -0.300348560626506, -0.0828207791627729
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 6:
         b1, a1 = -0.244262599183892, -0.267502535686502
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 7:
         b1, a1 = -0.409677351330214, -0.558845927943435
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if n == 8:
         b1, a1 = -0.488354948027081, -0.889342857411619
-        return y1 * 10 ** (10 ** (a1 + b1 * logx))
+        return y1 * _pow10pow10(a1 + b1 * logx)
     if 8 < n < 1001:
         b1 = 0.1462 * logn ** 3.0 - 4.2139 * logn ** 2.0 + 14.366 * logn - 10.658
         a1 = (-0.541 * logn ** 5.0 + 4.6943 * logn ** 4.0 - 15.407 * logn ** 3.0
@@ -329,12 +372,12 @@ def getLowerFN_w(n: int, x: np.ndarray, w: np.ndarray) -> float:
         b2 = 26.945 * logn ** 3.0 - 221.42 * logn ** 2.0 + 606.91 * logn - 553.89
         a2 = 18.149 * logn ** 3.0 - 149.27 * logn ** 2.0 + 410.15 * logn - 378.47
         if n <= 264 or (n < 568 and (a1 + b1 * logx > a2 + b2 * logx)):
-            return y1 * 10 ** (10 ** (a1 + b1 * logx))
-        return y1 / 10 ** (10 ** (a2 + b2 * logx))
+            return y1 * _pow10pow10(a1 + b1 * logx)
+        return y1 / _pow10pow10(a2 + b2 * logx)
     # n >= 1001
     b1 = 0.0424 * logn + 1.4479
     a1 = 0.3861 * logn - 2.5852
-    return y1 / 10 ** (10 ** (a1 + b1 * logx))
+    return y1 / _pow10pow10(a1 + b1 * logx)
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +399,28 @@ def _mu(mu_tech: MuTech, trueY: np.ndarray) -> tuple[float, np.ndarray]:
     return stats.halfSampleMode(s), s
 
 
+class _RCRDegenerate(Exception):
+    """A rejection iteration found NO candidate points — an empty kept/residual
+    set. Reached e.g. on a NonParametric muFunc where every point fails the
+    model test (adjacent/edge/equal-angle neighbour lines), or on all-rejected
+    input. Without points there is no mu/sigma to compute (getMedian would index
+    y[0] on a size-0 array). This is raised internally and caught at the
+    performRejection_LS / performBulkRejection_LS entry points, which return a
+    nan result — the documented "rejection cannot proceed" outcome. It is NOT
+    part of the public contract: callers see nan, never this exception. (No
+    non-degenerate input produces an empty set, so parity is unaffected.)"""
+
+
+def _degenerate_state(sigma_choice: "SigmaChoice") -> dict:
+    """The per-pass mu/sigma state for a degenerate (no-candidate) rejection:
+    all nan, with the key set matching the chosen sigma family."""
+    if sigma_choice is SigmaChoice.EACH:
+        return {"mu": np.nan, "sigma_below": np.nan, "sigma_above": np.nan,
+                "st_dev_above": np.nan, "st_dev_below": np.nan}
+    return {"mu": np.nan, "sigma": np.nan, "st_dev": np.nan,
+            "st_dev_above": np.nan, "st_dev_below": np.nan}
+
+
 def _select_candidates(
     flags: np.ndarray, y: np.ndarray, mu_tech: "MuTech",
     non_parametric_model=None, parametric_model=None,
@@ -369,13 +434,19 @@ def _select_candidates(
         needs_combos = mu_name in ("MEDIAN", "MODE")
         parametric_model.build_model_space(build_combos=needs_combos)
         trueY = parametric_model.handle_mu_tech_select(mu_tech=mu_name)
+        if trueY.size == 0:
+            raise _RCRDegenerate
         return parametric_model.indices, trueY, 0.0
     if non_parametric_model is not None:
         indices, trueY = non_parametric_model.mu_func(flags, y)
+        if trueY.size == 0:
+            raise _RCRDegenerate
         mu, _ = _mu(mu_tech, trueY)
         return indices, trueY, mu
     indices = np.where(flags)[0]
     trueY = y[indices]
+    if trueY.size == 0:
+        raise _RCRDegenerate
     mu, _ = _mu(mu_tech, trueY)
     return indices, trueY, mu
 
@@ -391,11 +462,17 @@ def _select_candidates_w(
         needs_combos = mu_name in ("MEDIAN", "MODE")
         parametric_model.build_model_space(build_combos=needs_combos)
         trueY = parametric_model.handle_mu_tech_select(mu_tech=mu_name)
+        if trueY.size == 0:
+            raise _RCRDegenerate
         return parametric_model.indices, parametric_model.trueW, trueY, 0.0
     if non_parametric_model is not None:
         indices, trueW, trueY = non_parametric_model.mu_func_w(flags, w, y)
+        if trueY.size == 0:
+            raise _RCRDegenerate
         return indices, trueW, trueY, _mu_w(mu_tech, trueW, trueY)
     indices = np.where(flags)[0]
+    if indices.size == 0:
+        raise _RCRDegenerate
     return indices, w[indices], y[indices], _mu_w(mu_tech, w[indices], y[indices])
 
 
@@ -483,11 +560,22 @@ def _sigma_single(sigma_tech: SigmaTech, w: np.ndarray, diff: np.ndarray,
 # ---------------------------------------------------------------------------
 
 def _reject(true_count: int, max_index: int, ratio: float,
-            flags: np.ndarray, y: np.ndarray) -> bool:
+            flags: np.ndarray, y: np.ndarray,
+            true_y: np.ndarray | None = None,
+            parametric_model=None) -> bool:
     """Port of cpp/src/RCR.cpp:5744. Returns True if rejection should STOP
     (no point rejected this iteration); False after marking flags[max_index]
-    = False."""
-    if stats.distinctValuesCheck(flags, y) and true_count * stats.erfcCustom(ratio) < 0.5:
+    = False.
+
+    Parametric models use the 3-arg :func:`stats.distinctValuesCheckParam` on the RESIDUAL vector
+    ``true_y`` (C++ RCR.cpp:5223/5785 pass ``trueY``), which stops the peel earlier than the 2-arg
+    check on the original ``y`` — that guard is what keeps the 2 marginal noise-fit scans the C++
+    keeps. Non-parametric keeps the 2-arg check on ``y`` (already bit-parity)."""
+    if parametric_model is not None:
+        distinct = stats.distinctValuesCheckParam(int(parametric_model.M), flags, true_y)
+    else:
+        distinct = stats.distinctValuesCheck(flags, y)
+    if distinct and true_count * stats.erfcCustom(ratio) < 0.5:
         flags[max_index] = False
         return False
     return True
@@ -532,7 +620,7 @@ def iterativeLowerSigmaRCR(
         # set into below/above-mu lists. Ties at mu go to BOTH lists; only
         # the LAST tied point's position is reweighted to 0.5 (mirrors a
         # quirk in the C++ that is intentionally preserved for parity —
-        # see rcr2-porting-gotchas memory).
+        # see rcrpy-porting-gotchas memory).
         diff = np.abs(trueY - mu)
         max_local = int(np.argmax(diff))
         max_val = float(diff[max_local])
@@ -588,7 +676,8 @@ def iterativeLowerSigmaRCR(
             st_dev_below = st_dev
             sigma = st_dev * n_correction
 
-        stop = _reject(true_count, max_index, max_val / sigma, flags, y)
+        stop = _reject(true_count, max_index, _reject_ratio(max_val, sigma), flags, y,
+                       true_y=trueY, parametric_model=parametric_model)
 
     return {
         "mu": mu,
@@ -680,7 +769,8 @@ def iterativeLowerSigmaRCR_w(
             st_dev_below = st_dev
             sigma = st_dev * n_correction
 
-        stop = _reject(true_count, max_index, max_val / sigma, flags, y)
+        stop = _reject(true_count, max_index, _reject_ratio(max_val, sigma), flags, y,
+                       true_y=trueY, parametric_model=parametric_model)
 
     return {
         "mu": mu,
@@ -800,7 +890,8 @@ def iterativeEachSigmaRCR(
             # interpretation: terminate the loop.
             stop = True
         else:
-            stop = _reject(true_count, max_index, max_val, flags, y)
+            stop = _reject(true_count, max_index, max_val, flags, y,
+                           true_y=trueY, parametric_model=parametric_model)
 
     return {
         "mu": mu,
@@ -892,7 +983,8 @@ def iterativeEachSigmaRCR_w(
         if max_index < 0:
             stop = True
         else:
-            stop = _reject(true_count, max_index, max_val, flags, y)
+            stop = _reject(true_count, max_index, max_val, flags, y,
+                           true_y=trueY, parametric_model=parametric_model)
 
     return {
         "mu": mu,
@@ -937,7 +1029,8 @@ def iterativeSingleSigmaRCR(
         st_dev = _sigma_single(sigma_tech, w_ones, diff_sorted, delta, true_count)
         sigma = st_dev * n_correct_fn(true_count)
 
-        stop = _reject(true_count, max_index, max_val / sigma, flags, y)
+        stop = _reject(true_count, max_index, _reject_ratio(max_val, sigma), flags, y,
+                       true_y=trueY, parametric_model=parametric_model)
 
     return {
         "mu": mu,
@@ -983,7 +1076,8 @@ def iterativeSingleSigmaRCR_w(
         st_dev = _sigma_single(sigma_tech, w_sorted, diff_sorted, delta, true_count)
         sigma = st_dev * n_correct_fn(true_count, trueW)
 
-        stop = _reject(true_count, max_index, max_val / sigma, flags, y)
+        stop = _reject(true_count, max_index, _reject_ratio(max_val, sigma), flags, y,
+                       true_y=trueY, parametric_model=parametric_model)
 
     return {
         "mu": mu,
@@ -1008,14 +1102,24 @@ def _bulk_sigma_lower(w: np.ndarray, diff: np.ndarray, counter: int) -> float:
 
 
 def _bulk_reject(flags: np.ndarray, indices_sorted: np.ndarray,
-                 ratios_sorted: np.ndarray, y: np.ndarray) -> bool:
+                 ratios_sorted: np.ndarray, y: np.ndarray,
+                 true_y: np.ndarray | None = None,
+                 parametric_model=None) -> bool:
     """Port of cpp/src/RCR.cpp:5768. Returns True if no point was rejected
     this pass (signal to stop). `ratios_sorted` is |y-mu|/sigma in ascending
-    order, and `indices_sorted` is the original-y index at each position."""
+    order, and `indices_sorted` is the original-y index at each position.
+
+    Parametric models gate the peel with :func:`stats.distinctValuesCheckParam` on the RESIDUAL
+    vector ``true_y`` (C++ bulkReject → RCR.cpp:5245 passes ``trueY``), which stops earlier than the
+    2-arg check on the original ``y``. Non-parametric keeps the 2-arg check on ``y``."""
+    param = parametric_model is not None
+    m = int(parametric_model.M) if param else 0
     no_points_rejected = True
     size = ratios_sorted.size
     i = size - 1
-    while i >= 0 and stats.distinctValuesCheck(flags, y) \
+    while i >= 0 \
+            and (stats.distinctValuesCheckParam(m, flags, true_y) if param
+                 else stats.distinctValuesCheck(flags, y)) \
             and size * stats.erfcCustom(float(ratios_sorted[i])) < 0.5:
         flags[int(indices_sorted[i])] = False
         no_points_rejected = False
@@ -1100,8 +1204,15 @@ def bulkLowerSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
         elif nonzero_below:
             sigma = _bulk_sigma_lower(w_below, diff_below, counter) * n_correct_fn(counter)
 
-        ratios_sorted = diff_hold_sorted / sigma
-        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # sigma collapses to 0 on no-spread data (perfectly-linear /
+            # near-constant); the C++ divides anyway and the resulting inf/NaN
+            # is absorbed by _bulk_reject (erfcCustom(inf)=0, *NaN < 0.5 = False
+            # -> nothing rejected). Suppress NumPy's cosmetic divide/invalid
+            # RuntimeWarning while preserving that exact IEEE result.
+            ratios_sorted = diff_hold_sorted / sigma
+        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y,
+                            true_y=trueY, parametric_model=parametric_model)
 
     return {"mu": mu, "sigma": sigma}
 
@@ -1149,8 +1260,15 @@ def bulkSingleSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
             sigma_raw = stats.get68th_w(w_ones, diff_sorted)
         sigma = sigma_raw * n_correct_fn(true_count)
 
-        ratios_sorted = diff_hold_sorted / sigma
-        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # sigma collapses to 0 on no-spread data (perfectly-linear /
+            # near-constant); the C++ divides anyway and the resulting inf/NaN
+            # is absorbed by _bulk_reject (erfcCustom(inf)=0, *NaN < 0.5 = False
+            # -> nothing rejected). Suppress NumPy's cosmetic divide/invalid
+            # RuntimeWarning while preserving that exact IEEE result.
+            ratios_sorted = diff_hold_sorted / sigma
+        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y,
+                            true_y=trueY, parametric_model=parametric_model)
 
     return {"mu": mu, "sigma": sigma}
 
@@ -1237,7 +1355,8 @@ def bulkEachSigmaRCR(y: np.ndarray, flags: np.ndarray, mu_tech: MuTech,
         indices_sorted = kept[sort_idx]
         ratios_sorted = diff_hold_arr[sort_idx]
 
-        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y)
+        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y,
+                            true_y=trueY, parametric_model=parametric_model)
 
     return {"mu": mu, "sigma_below": sigma_below, "sigma_above": sigma_above}
 
@@ -1321,8 +1440,15 @@ def bulkLowerSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
         elif nonzero_below:
             sigma = _bulk_sigma_lower(w_below_arr, diff_below, true_count) * n_correct_fn_w(true_count, trueW)
 
-        ratios_sorted = diff_hold_sorted / sigma
-        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # sigma collapses to 0 on no-spread data (perfectly-linear /
+            # near-constant); the C++ divides anyway and the resulting inf/NaN
+            # is absorbed by _bulk_reject (erfcCustom(inf)=0, *NaN < 0.5 = False
+            # -> nothing rejected). Suppress NumPy's cosmetic divide/invalid
+            # RuntimeWarning while preserving that exact IEEE result.
+            ratios_sorted = diff_hold_sorted / sigma
+        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y,
+                            true_y=trueY, parametric_model=parametric_model)
 
     return {"mu": mu, "sigma": sigma}
 
@@ -1366,8 +1492,15 @@ def bulkSingleSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
             sigma_raw = stats.get68th_w(trueW_sorted, diff_sorted)
         sigma = sigma_raw * n_correct_fn_w(true_count, trueW)
 
-        ratios_sorted = diff_hold_sorted / sigma
-        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # sigma collapses to 0 on no-spread data (perfectly-linear /
+            # near-constant); the C++ divides anyway and the resulting inf/NaN
+            # is absorbed by _bulk_reject (erfcCustom(inf)=0, *NaN < 0.5 = False
+            # -> nothing rejected). Suppress NumPy's cosmetic divide/invalid
+            # RuntimeWarning while preserving that exact IEEE result.
+            ratios_sorted = diff_hold_sorted / sigma
+        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y,
+                            true_y=trueY, parametric_model=parametric_model)
 
     return {"mu": mu, "sigma": sigma}
 
@@ -1442,7 +1575,8 @@ def bulkEachSigmaRCR_w(w: np.ndarray, y: np.ndarray, flags: np.ndarray,
         sort_idx = np.argsort(diff_hold_arr, kind="stable")
         indices_sorted = kept[sort_idx]
         ratios_sorted = diff_hold_arr[sort_idx]
-        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y)
+        stop = _bulk_reject(flags, indices_sorted, ratios_sorted, y,
+                            true_y=trueY, parametric_model=parametric_model)
 
     return {"mu": mu, "sigma_below": sigma_below, "sigma_above": sigma_above}
 
@@ -1588,19 +1722,23 @@ def performBulkRejection_LS(
     mods = (non_parametric_model, parametric_model)
 
     if w is None:
-        # Pass 1: bulk
-        if sigma_choice is SigmaChoice.LOWER:
-            bulkLowerSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
-            iter_loop = iterativeLowerSigmaRCR
-        elif sigma_choice is SigmaChoice.SINGLE:
-            bulkSingleSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
-            iter_loop = iterativeSingleSigmaRCR
-        else:  # EACH
-            bulkEachSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
-            iter_loop = iterativeEachSigmaRCR
-        iter_loop(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw, *mods)
-        iter_loop(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw, *mods)
-        state = iter_loop(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw, *mods)
+        # Pass 1: bulk. An empty candidate set at any pass -> nan result (see
+        # performRejection_LS); flags keep whatever was rejected first.
+        try:
+            if sigma_choice is SigmaChoice.LOWER:
+                bulkLowerSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
+                iter_loop = iterativeLowerSigmaRCR
+            elif sigma_choice is SigmaChoice.SINGLE:
+                bulkSingleSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
+                iter_loop = iterativeSingleSigmaRCR
+            else:  # EACH
+                bulkEachSigmaRCR(y, flags, pass1_mu, n_correct_unw, *mods)
+                iter_loop = iterativeEachSigmaRCR
+            iter_loop(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw, *mods)
+            iter_loop(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw, *mods)
+            state = iter_loop(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw, *mods)
+        except _RCRDegenerate:
+            state = _degenerate_state(sigma_choice)
 
         kept = np.where(flags)[0]
         out = {"flags": flags, "indices": kept, "clean_y": y[kept].copy(), **state}
@@ -1608,18 +1746,21 @@ def performBulkRejection_LS(
         return out
 
     # Weighted bulk
-    if sigma_choice is SigmaChoice.LOWER:
-        bulkLowerSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
-        iter_loop_w = iterativeLowerSigmaRCR_w
-    elif sigma_choice is SigmaChoice.SINGLE:
-        bulkSingleSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
-        iter_loop_w = iterativeSingleSigmaRCR_w
-    else:
-        bulkEachSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
-        iter_loop_w = iterativeEachSigmaRCR_w
-    iter_loop_w(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt, *mods)
-    iter_loop_w(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt, *mods)
-    state = iter_loop_w(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt, *mods)
+    try:
+        if sigma_choice is SigmaChoice.LOWER:
+            bulkLowerSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
+            iter_loop_w = iterativeLowerSigmaRCR_w
+        elif sigma_choice is SigmaChoice.SINGLE:
+            bulkSingleSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
+            iter_loop_w = iterativeSingleSigmaRCR_w
+        else:
+            bulkEachSigmaRCR_w(w, y, flags, pass1_mu, n_correct_wgt, *mods)
+            iter_loop_w = iterativeEachSigmaRCR_w
+        iter_loop_w(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt, *mods)
+        iter_loop_w(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt, *mods)
+        state = iter_loop_w(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt, *mods)
+    except _RCRDegenerate:
+        state = _degenerate_state(sigma_choice)
 
     kept = np.where(flags)[0]
     out = {"flags": flags, "indices": kept, "clean_y": y[kept].copy(), **state}
@@ -1689,14 +1830,20 @@ def performRejection_LS(
     extra_unw = (non_parametric_model, parametric_model)
     extra_wgt = (non_parametric_model, parametric_model)
 
-    if w is None:
-        state = loop_unw(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw, *extra_unw)
-        state = loop_unw(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw, *extra_unw)
-        state = loop_unw(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw, *extra_unw)
-    else:
-        state = loop_wgt(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt, *extra_wgt)
-        state = loop_wgt(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt, *extra_wgt)
-        state = loop_wgt(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt, *extra_wgt)
+    # An empty candidate set at any pass (e.g. a NonParametric muFunc where no
+    # point has a valid model) -> nan result, the documented "rejection cannot
+    # proceed" outcome. flags keep whatever was rejected before the empty pass.
+    try:
+        if w is None:
+            state = loop_unw(y, flags, pass1_mu, pass1_sigma, delta, n_correct_unw, *extra_unw)
+            state = loop_unw(y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_unw, *extra_unw)
+            state = loop_unw(y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_unw, *extra_unw)
+        else:
+            state = loop_wgt(w, y, flags, pass1_mu, pass1_sigma, delta, n_correct_wgt, *extra_wgt)
+            state = loop_wgt(w, y, flags, MuTech.MEDIAN, SigmaTech.SIXTY_EIGHTH_PERCENTILE, delta, n_correct_wgt, *extra_wgt)
+            state = loop_wgt(w, y, flags, MuTech.MEAN, SigmaTech.STANDARD_DEVIATION, delta, n_correct_wgt, *extra_wgt)
+    except _RCRDegenerate:
+        state = _degenerate_state(sigma_choice)
 
     indices_kept = np.where(flags)[0]
     indices_rejected = np.where(~flags)[0]

@@ -1,4 +1,4 @@
-"""Regression test: the unity tables in rcr2.tables must hash to the exact
+"""Regression test: the unity tables in rcrpy.tables must hash to the exact
 byte-values they had when extracted from cpp/src/RCR.cpp.
 
 The tables are float-literal data copied (via python/scripts/extract_unity_tables.py)
@@ -15,7 +15,7 @@ import hashlib
 
 import pytest
 
-from rcr2 import tables
+from rcrpy import tables
 
 EXPECTED_SHA256 = {
     "ESUnity":      "a3a42e49e58a77b4b0417b4acf5088b60ac19c498e94daf7666129d31c834f24",

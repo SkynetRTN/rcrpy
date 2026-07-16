@@ -9,17 +9,17 @@ Constrain the fit with bounds or Gaussian priors.
 Pull a parameter toward a known value with a known uncertainty:
 
 ```python
-import rcr2
+import rcrpy
 
 # Gaussian prior on the intercept at mu=2.0, sigma=0.1.
 # NaN values disable the prior on that parameter.
-priors = rcr2.Priors(
-    prior_type=rcr2.PriorType.GAUSSIAN,
+priors = rcrpy.Priors(
+    prior_type=rcrpy.PriorType.GAUSSIAN,
     gaussian_params=[[2.0, 0.1],            # intercept: N(2.0, 0.1)
                      [float("nan"), float("nan")]],   # slope: no prior
 )
 
-model = rcr2.FunctionalForm(linear, x, y, [d_b, d_m], guess=[0.0, 0.0],
+model = rcrpy.FunctionalForm(linear, x, y, [d_b, d_m], guess=[0.0, 0.0],
                              priors=priors)
 ```
 
@@ -32,8 +32,8 @@ vector.
 Force a parameter into a fixed interval:
 
 ```python
-priors = rcr2.Priors(
-    prior_type=rcr2.PriorType.CONSTRAINED,
+priors = rcrpy.Priors(
+    prior_type=rcrpy.PriorType.CONSTRAINED,
     param_bounds=[[0.0, float("nan")],     # intercept: lower-bounded by 0
                   [-5.0, 5.0]],             # slope: [-5, 5]
 )
@@ -48,8 +48,8 @@ respects them throughout the optimization, not just as a soft penalty).
 Combine Gaussian + bounded:
 
 ```python
-priors = rcr2.Priors(
-    prior_type=rcr2.PriorType.MIXED,
+priors = rcrpy.Priors(
+    prior_type=rcrpy.PriorType.MIXED,
     gaussian_params=[[2.0, 0.1], [float("nan"), float("nan")]],
     param_bounds=[[float("nan"), float("nan")], [0.0, 5.0]],
 )
@@ -66,7 +66,7 @@ def my_prior(params):
     # Sharp penalty if slope is negative
     return np.array([max(0.0, -params[1]) * 100.0])
 
-priors = rcr2.Priors(prior_type=rcr2.PriorType.CUSTOM, p=my_prior)
+priors = rcrpy.Priors(prior_type=rcrpy.PriorType.CUSTOM, p=my_prior)
 ```
 
 ## Pivot points
@@ -81,7 +81,7 @@ model function can reference it inline:
 ```python
 def powerlaw(x, params):
     a0, a1 = params
-    return a0 * (x / 10**rcr2.FunctionalForm.pivot) ** a1
+    return a0 * (x / 10**rcrpy.FunctionalForm.pivot) ** a1
 ```
 
 ### Static pivot
@@ -89,7 +89,7 @@ def powerlaw(x, params):
 If you know the right pivot:
 
 ```python
-rcr2.FunctionalForm.pivot = 0.5   # set once before constructing the model
+rcrpy.FunctionalForm.pivot = 0.5   # set once before constructing the model
 ```
 
 ### Pivot search
@@ -104,7 +104,7 @@ def get_pivot_powerlaw(xdata, weights, f, params):
     bot = np.sum(weights * np.power(10., -2.*f(xdata, params)))
     return top / bot
 
-model = rcr2.FunctionalForm(
+model = rcrpy.FunctionalForm(
     powerlaw, x, y, partials, guess=[1.0, 0.5],
     pivot_function=get_pivot_powerlaw,
     pivot_guess=0.0,
@@ -113,7 +113,7 @@ model = rcr2.FunctionalForm(
 
 Each iteration `model.build_model_space()` calls your pivot function on
 the current flagged subset; the result is stored in
-`rcr2.FunctionalForm.pivot` and in `model.result.pivot`.
+`rcrpy.FunctionalForm.pivot` and in `model.result.pivot`.
 
 ## Parameter uncertainties
 

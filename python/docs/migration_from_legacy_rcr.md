@@ -1,7 +1,7 @@
-# Migrating from legacy `rcr` to `rcr2`
+# Migrating from legacy `rcr` to `rcrpy`
 
 The legacy package on PyPI (`rcr`) is a pybind11 wrapper around the C++
-implementation at [`../../cpp/`](../../cpp/). `rcr2` is a pure-Python
+implementation at [`../../cpp/`](../../cpp/). `rcrpy` is a pure-Python
 reimplementation: same algorithm, same answers (Phase 1 bit-identical at
 rtol=1e-12; Phase 2 within rtol=5%), but no C++ toolchain needed and
 significantly faster on functional-form fits.
@@ -16,27 +16,27 @@ table.
 import rcr
 
 # After
-import rcr2
+import rcrpy
 ```
 
 ## Constants and enums
 
-| Legacy `rcr` | `rcr2` |
+| Legacy `rcr` | `rcrpy` |
 |---|---|
-| `rcr.LS_MODE_68` | `rcr2.RejectionTech.LS_MODE_68` |
-| `rcr.LS_MODE_DL` | `rcr2.RejectionTech.LS_MODE_DL` |
-| `rcr.SS_MEDIAN_DL` | `rcr2.RejectionTech.SS_MEDIAN_DL` |
-| `rcr.ES_MODE_DL` | `rcr2.RejectionTech.ES_MODE_DL` |
-| `rcr.CUSTOM_PRIORS` | `rcr2.PriorType.CUSTOM` |
-| `rcr.GAUSSIAN_PRIORS` | `rcr2.PriorType.GAUSSIAN` |
-| `rcr.CONSTRAINED_PRIORS` | `rcr2.PriorType.CONSTRAINED` |
-| `rcr.MIXED_PRIORS` | `rcr2.PriorType.MIXED` |
+| `rcr.LS_MODE_68` | `rcrpy.RejectionTech.LS_MODE_68` |
+| `rcr.LS_MODE_DL` | `rcrpy.RejectionTech.LS_MODE_DL` |
+| `rcr.SS_MEDIAN_DL` | `rcrpy.RejectionTech.SS_MEDIAN_DL` |
+| `rcr.ES_MODE_DL` | `rcrpy.RejectionTech.ES_MODE_DL` |
+| `rcr.CUSTOM_PRIORS` | `rcrpy.PriorType.CUSTOM` |
+| `rcr.GAUSSIAN_PRIORS` | `rcrpy.PriorType.GAUSSIAN` |
+| `rcr.CONSTRAINED_PRIORS` | `rcrpy.PriorType.CONSTRAINED` |
+| `rcr.MIXED_PRIORS` | `rcrpy.PriorType.MIXED` |
 
 ## Methods (camelCase → snake_case)
 
-| Legacy `rcr` | `rcr2` |
+| Legacy `rcr` | `rcrpy` |
 |---|---|
-| `r = rcr.RCR(rcr.LS_MODE_68)` | `r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)` |
+| `r = rcr.RCR(rcr.LS_MODE_68)` | `r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)` |
 | `r.setRejectionTech(...)` | `r.set_rejection_tech(...)` |
 | `r.performRejection(y)` | `r.perform_rejection(y)` |
 | `r.performBulkRejection(y)` | `r.perform_bulk_rejection(y)` |
@@ -46,7 +46,7 @@ import rcr2
 
 ## Result fields (camelCase → snake_case)
 
-| Legacy `r.result.*` | `rcr2 r.result.*` |
+| Legacy `r.result.*` | `rcrpy r.result.*` |
 |---|---|
 | `mu`, `sigma` | `mu`, `sigma` |
 | `stDev`, `stDevBelow`, `stDevAbove`, `stDevTotal` | `st_dev`, `st_dev_below`, `st_dev_above`, `st_dev_total` |
@@ -70,17 +70,17 @@ print(model.result.parameter_uncertainties)
 print(model.result.pivot)
 print(rcr.FunctionalForm.pivot)
 
-# After  (identical, modulo `rcr → rcr2` and field naming)
-model = rcr2.FunctionalForm(f, xdata, ydata, partials, guess,
+# After  (identical, modulo `rcr → rcrpy` and field naming)
+model = rcrpy.FunctionalForm(f, xdata, ydata, partials, guess,
                              weights=w, error_y=ey)
 print(model.result.parameters)
 print(model.result.parameter_uncertainties)
 print(model.result.pivot)
-print(rcr2.FunctionalForm.pivot)
+print(rcrpy.FunctionalForm.pivot)
 ```
 
 The `pivot` static-class attribute works the same way — your model
-function can reference `rcr2.FunctionalForm.pivot` inline.
+function can reference `rcrpy.FunctionalForm.pivot` inline.
 
 ## Priors
 
@@ -92,7 +92,7 @@ snake_case.
 mypriors = rcr.Priors(rcr.MIXED_PRIORS, gaussianParams, paramBounds)
 
 # After
-mypriors = rcr2.Priors(prior_type=rcr2.PriorType.MIXED,
+mypriors = rcrpy.Priors(prior_type=rcrpy.PriorType.MIXED,
                         gaussian_params=gaussian_params,
                         param_bounds=param_bounds)
 ```
@@ -103,7 +103,7 @@ Subclass the same way; override `mu_func` (and optionally `mu_func_w`)
 in Python instead of `muFunc` in C++.
 
 ```python
-class MyModel(rcr2.NonParametric):
+class MyModel(rcrpy.NonParametric):
     def mu_func(self, flags, y):
         # Decide which points contribute to the mu estimate this iteration.
         idx = your_filter(flags, y)
@@ -111,12 +111,12 @@ class MyModel(rcr2.NonParametric):
         return idx, y[idx]
 ```
 
-## What `rcr2` does NOT include from legacy `rcr`
+## What `rcrpy` does NOT include from legacy `rcr`
 
 | Feature | Status |
 |---|---|
-| Direct pybind11 binding to C++ | Not applicable — `rcr2` is pure Python |
-| Sphinx-rendered docstrings exactly matching legacy | `rcr2` has docstrings; format may differ slightly |
+| Direct pybind11 binding to C++ | Not applicable — `rcrpy` is pure Python |
+| Sphinx-rendered docstrings exactly matching legacy | `rcrpy` has docstrings; format may differ slightly |
 | `extraParameterSpace` for "runaway" combos | Not implemented (our solvers don't produce the legacy's M+1 signal) |
 | 100% bit-identical MEDIAN/MODE for parametric | Different RNG between Python and C++'s `std::mt19937` means parity is rtol=5% on the combo-sampled paths |
 
@@ -124,7 +124,7 @@ For Phase 1 (single-value RCR), parity is bit-identical at rtol=1e-12.
 
 ## Performance
 
-| Workload | Legacy (C++) | `rcr2` |
+| Workload | Legacy (C++) | `rcrpy` |
 |---|---|---|
 | Single-value RCR, large N | Baseline | ~10× slower |
 | Functional-form fit, no rejection | Baseline | **80×–6000× FASTER** |

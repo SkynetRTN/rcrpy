@@ -1,4 +1,4 @@
-"""Public API for rcr2.
+"""Public API for rcrpy.
 
 Mirrors the surface defined in cpp/src/RCR.h:
     enum RejectionTechs { SS_MEDIAN_DL, LS_MODE_68, LS_MODE_DL, ES_MODE_DL }
@@ -29,7 +29,7 @@ class MuType(Enum):
     to a model object that the user attaches via setter methods on RCR.
     Ports of cpp/src/RCR.h::MuTypes."""
     VALUE = "VALUE"
-    PARAMETRIC = "PARAMETRIC"      # FunctionalForm — not yet wired in rcr2
+    PARAMETRIC = "PARAMETRIC"      # FunctionalForm — not yet wired in rcrpy
     NONPARAMETRIC = "NONPARAMETRIC"
 
 
@@ -57,7 +57,7 @@ class RCR:
     """Single-value Robust Chauvenet Rejection.
 
     Phase 1: API skeleton. The real iterative + bulk loops are ported in
-    rcr2.rejection and dispatched here.
+    rcrpy.rejection and dispatched here.
     """
 
     def __init__(self, rejection_tech: RejectionTech = RejectionTech.SS_MEDIAN_DL):
@@ -74,14 +74,14 @@ class RCR:
         self.mu_type = mu_type
 
     def set_non_parametric_model(self, model) -> None:
-        """Attach a `rcr2.NonParametric` subclass instance. The user must
+        """Attach a `rcrpy.NonParametric` subclass instance. The user must
         also call `set_mu_type(MuType.NONPARAMETRIC)`. Port of
         cpp/src/RCR.h::setNonParametricModel."""
         self.non_parametric_model = model
         self.mu_type = MuType.NONPARAMETRIC
 
     def set_parametric_model(self, model) -> None:
-        """Attach a `rcr2.FunctionalForm` instance for model-fitting RCR.
+        """Attach a `rcrpy.FunctionalForm` instance for model-fitting RCR.
         Sets mu_type to PARAMETRIC automatically. Port of
         cpp/src/RCR.h::setParametricModel."""
         self.parametric_model = model
@@ -92,7 +92,7 @@ class RCR:
         y: Sequence[float],
         w: Sequence[float] | None = None,
     ) -> None:
-        from rcr2 import rejection
+        from rcrpy import rejection
         y_arr = np.asarray(y, dtype=np.float64)
         w_arr = None if w is None else np.asarray(w, dtype=np.float64)
         out = rejection.performRejection_LS(
@@ -133,7 +133,7 @@ class RCR:
         y: Sequence[float],
         w: Sequence[float] | None = None,
     ) -> None:
-        from rcr2 import rejection
+        from rcrpy import rejection
         y_arr = np.asarray(y, dtype=np.float64)
         w_arr = None if w is None else np.asarray(w, dtype=np.float64)
         out = rejection.performBulkRejection_LS(

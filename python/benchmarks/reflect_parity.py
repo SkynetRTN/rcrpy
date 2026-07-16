@@ -1,4 +1,4 @@
-"""Diagnostic: measure how tightly rcr2 matches the C++ oracle on each parity
+"""Diagnostic: measure how tightly rcrpy matches the C++ oracle on each parity
 case. We assert rtol=1e-12, but how much slack is there really?
 
 For each (tech, dataset, weighted?) tuple, report:
@@ -19,7 +19,7 @@ from typing import Callable
 import numpy as np
 
 import rcr  # oracle
-import rcr2
+import rcrpy
 
 REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
 ASSETS = REPO / "assets" / "test"
@@ -87,7 +87,7 @@ def run_case(label: str, tech_enum_port, tech_enum_oracle, dataset: str,
     y = d["y"]
     w = d.get("w")
 
-    port = rcr2.RCR(tech_enum_port)
+    port = rcrpy.RCR(tech_enum_port)
     oracle = rcr.RCR(tech_enum_oracle)
 
     if weighted:
@@ -120,26 +120,26 @@ def run_case(label: str, tech_enum_port, tech_enum_oracle, dataset: str,
 
 CASES = [
     # (label, port-tech, oracle-tech, dataset, weighted?, fields, oracle-method, port-method)
-    ("LS_MODE_68    smoke ",       rcr2.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_smoke.csv",                False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
-    ("LS_MODE_68    single",       rcr2.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_singlevalue.csv",          False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
-    ("LS_MODE_68    weighted",     rcr2.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_weighted_singlevalue.csv", True,  ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
-    ("LS_MODE_DL    smoke ",       rcr2.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_smoke.csv",                False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
-    ("LS_MODE_DL    single",       rcr2.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_singlevalue.csv",          False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
-    ("LS_MODE_DL    weighted",     rcr2.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_weighted_singlevalue.csv", True,  ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
-    ("SS_MEDIAN_DL  smoke ",       rcr2.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_smoke.csv",                False, SS_FIELDS,             "performRejection",     "perform_rejection"),
-    ("SS_MEDIAN_DL  single",       rcr2.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_singlevalue.csv",          False, SS_FIELDS,             "performRejection",     "perform_rejection"),
-    ("SS_MEDIAN_DL  weighted",     rcr2.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_weighted_singlevalue.csv", True,  SS_FIELDS,             "performRejection",     "perform_rejection"),
-    ("ES_MODE_DL    smoke ",       rcr2.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_smoke.csv",                False, ITERATIVE_EACH_FIELDS, "performRejection",     "perform_rejection"),
-    ("ES_MODE_DL    single",       rcr2.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_singlevalue.csv",          False, ITERATIVE_EACH_FIELDS, "performRejection",     "perform_rejection"),
-    ("ES_MODE_DL    weighted",     rcr2.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_weighted_singlevalue.csv", True,  ITERATIVE_EACH_FIELDS, "performRejection",     "perform_rejection"),
-    ("LS_MODE_68    BULK smoke",   rcr2.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_smoke.csv",                False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
-    ("LS_MODE_68    BULK single",  rcr2.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_singlevalue.csv",          False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
-    ("LS_MODE_DL    BULK smoke",   rcr2.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_smoke.csv",                False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
-    ("LS_MODE_DL    BULK single",  rcr2.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_singlevalue.csv",          False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
-    ("SS_MEDIAN_DL  BULK smoke",   rcr2.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_smoke.csv",                False, SS_FIELDS,             "performBulkRejection", "perform_bulk_rejection"),
-    ("SS_MEDIAN_DL  BULK single",  rcr2.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_singlevalue.csv",          False, SS_FIELDS,             "performBulkRejection", "perform_bulk_rejection"),
-    ("ES_MODE_DL    BULK smoke",   rcr2.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_smoke.csv",                False, ITERATIVE_EACH_FIELDS, "performBulkRejection", "perform_bulk_rejection"),
-    ("ES_MODE_DL    BULK single",  rcr2.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_singlevalue.csv",          False, ITERATIVE_EACH_FIELDS, "performBulkRejection", "perform_bulk_rejection"),
+    ("LS_MODE_68    smoke ",       rcrpy.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_smoke.csv",                False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
+    ("LS_MODE_68    single",       rcrpy.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_singlevalue.csv",          False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
+    ("LS_MODE_68    weighted",     rcrpy.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_weighted_singlevalue.csv", True,  ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
+    ("LS_MODE_DL    smoke ",       rcrpy.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_smoke.csv",                False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
+    ("LS_MODE_DL    single",       rcrpy.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_singlevalue.csv",          False, ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
+    ("LS_MODE_DL    weighted",     rcrpy.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_weighted_singlevalue.csv", True,  ITERATIVE_FIELDS,      "performRejection",     "perform_rejection"),
+    ("SS_MEDIAN_DL  smoke ",       rcrpy.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_smoke.csv",                False, SS_FIELDS,             "performRejection",     "perform_rejection"),
+    ("SS_MEDIAN_DL  single",       rcrpy.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_singlevalue.csv",          False, SS_FIELDS,             "performRejection",     "perform_rejection"),
+    ("SS_MEDIAN_DL  weighted",     rcrpy.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_weighted_singlevalue.csv", True,  SS_FIELDS,             "performRejection",     "perform_rejection"),
+    ("ES_MODE_DL    smoke ",       rcrpy.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_smoke.csv",                False, ITERATIVE_EACH_FIELDS, "performRejection",     "perform_rejection"),
+    ("ES_MODE_DL    single",       rcrpy.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_singlevalue.csv",          False, ITERATIVE_EACH_FIELDS, "performRejection",     "perform_rejection"),
+    ("ES_MODE_DL    weighted",     rcrpy.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_weighted_singlevalue.csv", True,  ITERATIVE_EACH_FIELDS, "performRejection",     "perform_rejection"),
+    ("LS_MODE_68    BULK smoke",   rcrpy.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_smoke.csv",                False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
+    ("LS_MODE_68    BULK single",  rcrpy.RejectionTech.LS_MODE_68,   rcr.LS_MODE_68,   "data_singlevalue.csv",          False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
+    ("LS_MODE_DL    BULK smoke",   rcrpy.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_smoke.csv",                False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
+    ("LS_MODE_DL    BULK single",  rcrpy.RejectionTech.LS_MODE_DL,   rcr.LS_MODE_DL,   "data_singlevalue.csv",          False, BULK_FIELDS,           "performBulkRejection", "perform_bulk_rejection"),
+    ("SS_MEDIAN_DL  BULK smoke",   rcrpy.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_smoke.csv",                False, SS_FIELDS,             "performBulkRejection", "perform_bulk_rejection"),
+    ("SS_MEDIAN_DL  BULK single",  rcrpy.RejectionTech.SS_MEDIAN_DL, rcr.SS_MEDIAN_DL, "data_singlevalue.csv",          False, SS_FIELDS,             "performBulkRejection", "perform_bulk_rejection"),
+    ("ES_MODE_DL    BULK smoke",   rcrpy.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_smoke.csv",                False, ITERATIVE_EACH_FIELDS, "performBulkRejection", "perform_bulk_rejection"),
+    ("ES_MODE_DL    BULK single",  rcrpy.RejectionTech.ES_MODE_DL,   rcr.ES_MODE_DL,   "data_singlevalue.csv",          False, ITERATIVE_EACH_FIELDS, "performBulkRejection", "perform_bulk_rejection"),
 ]
 
 

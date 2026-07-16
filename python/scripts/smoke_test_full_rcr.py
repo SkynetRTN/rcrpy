@@ -1,6 +1,6 @@
 """End-to-end smoke test of the standalone `full_rcr.py`.
 
-Imports it directly (no rcr2 package needed), runs both single-value
+Imports it directly (no rcrpy package needed), runs both single-value
 and functional-form quick-starts, and verifies the results are sensible.
 Designed to be run in a sterile venv with only numpy + scipy.
 """

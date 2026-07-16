@@ -1,6 +1,6 @@
-# `rcr2` benchmarks
+# `rcrpy` benchmarks
 
-Standalone scripts for measuring `rcr2` correctness and performance.
+Standalone scripts for measuring `rcrpy` correctness and performance.
 None of these are part of the installed package — they're maintainer
 tools that live alongside the source.
 
@@ -21,6 +21,6 @@ python python/benchmarks/diagnostics.py
 python python/benchmarks/diagnostics_functional.py
 ```
 
-All four require the legacy `rcr` C++ module (the oracle) plus `rcr2`
+All four require the legacy `rcr` C++ module (the oracle) plus `rcrpy`
 itself installed in the active environment — i.e., `pip install -e
 ./python[dev]` covers everything.

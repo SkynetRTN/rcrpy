@@ -7,7 +7,7 @@ while rejecting outliers, use `FunctionalForm` + `set_parametric_model`.
 
 ```python
 import numpy as np
-import rcr2
+import rcrpy
 
 # Linear data with one-sided outliers
 rng = np.random.default_rng(0)
@@ -27,12 +27,12 @@ def d_linear_m(x, params):
     return x            # df/d(params[1])
 
 # 2. Build the FunctionalForm with an initial-guess parameter vector.
-model = rcr2.FunctionalForm(
+model = rcrpy.FunctionalForm(
     linear, x, y, [d_linear_b, d_linear_m], guess=[0.0, 0.0],
 )
 
 # 3. Run RCR with the model attached.
-r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
 r.set_parametric_model(model)
 r.perform_rejection(y.tolist())
 
@@ -53,14 +53,14 @@ Examples (mirrors of [`../../cpp/src/functional_calc_test.py`](../../cpp/src/fun
 ```python
 def quad(x, params):
     a0, a1, a2 = params
-    p = rcr2.FunctionalForm.pivot
+    p = rcrpy.FunctionalForm.pivot
     return a0 + a1 * (x - p) + a2 * (x - p)**2
 
 def d_quad_a0(x, params): return 1.0
-def d_quad_a1(x, params): return x - rcr2.FunctionalForm.pivot
-def d_quad_a2(x, params): return (x - rcr2.FunctionalForm.pivot)**2
+def d_quad_a1(x, params): return x - rcrpy.FunctionalForm.pivot
+def d_quad_a2(x, params): return (x - rcrpy.FunctionalForm.pivot)**2
 
-model = rcr2.FunctionalForm(quad, x, y,
+model = rcrpy.FunctionalForm(quad, x, y,
                              [d_quad_a0, d_quad_a1, d_quad_a2],
                              guess=[0.0, 0.0, 0.0])
 ```
@@ -70,13 +70,13 @@ model = rcr2.FunctionalForm(quad, x, y,
 ```python
 def powerlaw(x, params):
     a0, a1 = params
-    return a0 * (x / 10**rcr2.FunctionalForm.pivot) ** a1
+    return a0 * (x / 10**rcrpy.FunctionalForm.pivot) ** a1
 
 def d_pl_a0(x, params):
-    return (x / 10**rcr2.FunctionalForm.pivot) ** params[1]
+    return (x / 10**rcrpy.FunctionalForm.pivot) ** params[1]
 
 def d_pl_a1(x, params):
-    return powerlaw(x, params) * np.log(x / 10**rcr2.FunctionalForm.pivot)
+    return powerlaw(x, params) * np.log(x / 10**rcrpy.FunctionalForm.pivot)
 ```
 
 ## With error bars
@@ -84,7 +84,7 @@ def d_pl_a1(x, params):
 ```python
 sigma_y = np.full(y.size, 0.3)  # per-point measurement uncertainties
 
-model = rcr2.FunctionalForm(
+model = rcrpy.FunctionalForm(
     linear, x, y, [d_linear_b, d_linear_m],
     guess=[0.0, 0.0],
     error_y=sigma_y,
@@ -100,7 +100,7 @@ populated from the post-fit Jacobian covariance.
 weights = np.ones(x.size)
 weights[outlier_indices] = 0.1   # downweight known-suspect points
 
-model = rcr2.FunctionalForm(
+model = rcrpy.FunctionalForm(
     linear, x, y, [d_linear_b, d_linear_m],
     guess=[0.0, 0.0],
     weights=weights,
@@ -121,7 +121,7 @@ def d_nd_p0(xv, params): return 1.0
 def d_nd_p1(xv, params): return xv[0]
 def d_nd_p2(xv, params): return xv[1]
 
-model = rcr2.FunctionalForm(f_nd, x, y, [d_nd_p0, d_nd_p1, d_nd_p2],
+model = rcrpy.FunctionalForm(f_nd, x, y, [d_nd_p0, d_nd_p1, d_nd_p2],
                              guess=[0.0, 0.0, 0.0])
 ```
 
@@ -131,7 +131,7 @@ scalar.
 
 ## Performance
 
-`rcr2`'s functional-form path is **significantly FASTER than the C++**
+`rcrpy`'s functional-form path is **significantly FASTER than the C++**
 on this kind of workload — typically 80×–6000× depending on N — because
 scipy's nonlinear-least-squares solver makes far fewer Python↔C++
 callback round-trips than the C++'s hand-rolled Gauss-Newton solver.

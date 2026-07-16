@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 
 def test_default_nonparametric_matches_value_path(data_smoke):
@@ -23,13 +23,13 @@ def test_default_nonparametric_matches_value_path(data_smoke):
     y = data_smoke["y"]
 
     # Baseline: standard MuType.VALUE path.
-    r_baseline = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r_baseline = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r_baseline.perform_rejection(y.tolist())
 
     # With default NonParametric (no override) attached.
-    r_np = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
-    r_np.set_non_parametric_model(rcr2.NonParametric())
-    assert r_np.mu_type is rcr2.MuType.NONPARAMETRIC
+    r_np = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
+    r_np.set_non_parametric_model(rcrpy.NonParametric())
+    assert r_np.mu_type is rcrpy.MuType.NONPARAMETRIC
     r_np.perform_rejection(y.tolist())
 
     np.testing.assert_allclose(r_np.result.mu, r_baseline.result.mu, rtol=1e-12)
@@ -43,7 +43,7 @@ def test_custom_nonparametric_subclass_changes_outcome(data_smoke):
     actually being called by the rejection loop."""
     y = data_smoke["y"]
 
-    class DropEverySecond(rcr2.NonParametric):
+    class DropEverySecond(rcrpy.NonParametric):
         call_count = 0
 
         def mu_func(self, flags, y):
@@ -54,7 +54,7 @@ def test_custom_nonparametric_subclass_changes_outcome(data_smoke):
             return self.indices, y[self.indices]
 
     model = DropEverySecond()
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r.set_non_parametric_model(model)
     r.perform_rejection(y.tolist())
 
@@ -62,7 +62,7 @@ def test_custom_nonparametric_subclass_changes_outcome(data_smoke):
     assert DropEverySecond.call_count > 0, "mu_func was never invoked"
 
     # Baseline for comparison.
-    r_base = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r_base = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r_base.perform_rejection(y.tolist())
     # Mu should differ because the model fed different candidate points
     # into the mu calculation.
@@ -72,15 +72,15 @@ def test_custom_nonparametric_subclass_changes_outcome(data_smoke):
 def test_setters_are_independent():
     """`set_mu_type` toggles the dispatch; `set_non_parametric_model`
     sets the model AND switches mu_type to NONPARAMETRIC in one call."""
-    r = rcr2.RCR()
-    assert r.mu_type is rcr2.MuType.VALUE
+    r = rcrpy.RCR()
+    assert r.mu_type is rcrpy.MuType.VALUE
 
-    r.set_mu_type(rcr2.MuType.NONPARAMETRIC)
-    assert r.mu_type is rcr2.MuType.NONPARAMETRIC
+    r.set_mu_type(rcrpy.MuType.NONPARAMETRIC)
+    assert r.mu_type is rcrpy.MuType.NONPARAMETRIC
 
-    r.set_mu_type(rcr2.MuType.VALUE)
+    r.set_mu_type(rcrpy.MuType.VALUE)
     assert r.non_parametric_model is None
 
-    r.set_non_parametric_model(rcr2.NonParametric())
-    assert r.mu_type is rcr2.MuType.NONPARAMETRIC
+    r.set_non_parametric_model(rcrpy.NonParametric())
+    assert r.mu_type is rcrpy.MuType.NONPARAMETRIC
     assert r.non_parametric_model is not None

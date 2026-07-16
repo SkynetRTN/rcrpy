@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -33,7 +33,7 @@ def _oracle(y_list: list[float]) -> dict:
 
 
 def _port(y: np.ndarray) -> dict:
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r.perform_bulk_rejection(y.tolist())
     return {
         "mu": r.result.mu,

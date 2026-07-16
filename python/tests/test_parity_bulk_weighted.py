@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -12,10 +12,10 @@ RTOL = 1e-12
 
 
 @pytest.mark.parametrize("tech_name,port_tech,sigma_kind", [
-    ("LS_MODE_68",   rcr2.RejectionTech.LS_MODE_68,   "lower"),
-    ("LS_MODE_DL",   rcr2.RejectionTech.LS_MODE_DL,   "lower"),
-    ("SS_MEDIAN_DL", rcr2.RejectionTech.SS_MEDIAN_DL, "single"),
-    ("ES_MODE_DL",   rcr2.RejectionTech.ES_MODE_DL,   "each"),
+    ("LS_MODE_68",   rcrpy.RejectionTech.LS_MODE_68,   "lower"),
+    ("LS_MODE_DL",   rcrpy.RejectionTech.LS_MODE_DL,   "lower"),
+    ("SS_MEDIAN_DL", rcrpy.RejectionTech.SS_MEDIAN_DL, "single"),
+    ("ES_MODE_DL",   rcrpy.RejectionTech.ES_MODE_DL,   "each"),
 ])
 def test_bulk_weighted(data_weighted_singlevalue, tech_name, port_tech, sigma_kind):
     oracle_tech = getattr(rcr_oracle, tech_name)
@@ -25,7 +25,7 @@ def test_bulk_weighted(data_weighted_singlevalue, tech_name, port_tech, sigma_ki
     o = rcr_oracle.RCR(oracle_tech)
     o.performBulkRejection(w.tolist(), y.tolist())
 
-    p = rcr2.RCR(port_tech)
+    p = rcrpy.RCR(port_tech)
     p.perform_bulk_rejection(y.tolist(), w=w.tolist())
 
     np.testing.assert_allclose(p.result.mu, o.result.mu, rtol=RTOL,

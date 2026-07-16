@@ -10,7 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -43,13 +43,13 @@ def _collect(r) -> dict:
 
 
 def _port_unw(y: np.ndarray) -> dict:
-    r = rcr2.RCR(rcr2.RejectionTech.ES_MODE_DL)
+    r = rcrpy.RCR(rcrpy.RejectionTech.ES_MODE_DL)
     r.perform_rejection(y.tolist())
     return _collect_port(r)
 
 
 def _port_w(w: np.ndarray, y: np.ndarray) -> dict:
-    r = rcr2.RCR(rcr2.RejectionTech.ES_MODE_DL)
+    r = rcrpy.RCR(rcrpy.RejectionTech.ES_MODE_DL)
     r.perform_rejection(y.tolist(), w=w.tolist())
     return _collect_port(r)
 

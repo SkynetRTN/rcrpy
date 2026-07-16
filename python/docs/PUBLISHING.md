@@ -1,4 +1,4 @@
-# Publishing `rcr2`
+# Publishing `rcrpy`
 
 This is a checklist for the maintainer (you). The CI workflow builds
 distributions automatically on every push; this file covers the **manual
@@ -38,7 +38,7 @@ From the **repo root**:
 ```bash
 # 1. Bump the version in TWO places.
 #    - python/pyproject.toml:  [project] version = "x.y.z"
-#    - python/src/rcr2/__init__.py:  __version__ = "x.y.z"
+#    - python/src/rcrpy/__init__.py:  __version__ = "x.y.z"
 #    (These must match.)
 
 # 2. Run the full test suite.
@@ -48,34 +48,34 @@ cd ..
 
 # 3. Build the wheel + sdist.
 python -m build ./python
-ls python/dist/   # should show rcr2-x.y.z-py3-none-any.whl and rcr2-x.y.z.tar.gz
+ls python/dist/   # should show rcrpy-x.y.z-py3-none-any.whl and rcrpy-x.y.z.tar.gz
 
 # 4. Install the BUILT wheel in a CLEAN venv and smoke-test it.
-python -m venv /tmp/rcr2-clean
-/tmp/rcr2-clean/bin/python -m pip install python/dist/rcr2-x.y.z-py3-none-any.whl
-/tmp/rcr2-clean/bin/python python/smoke_install.py
-# (On Windows: c:\path\rcr2-clean\Scripts\python.exe — adjust accordingly.)
+python -m venv /tmp/rcrpy-clean
+/tmp/rcrpy-clean/bin/python -m pip install python/dist/rcrpy-x.y.z-py3-none-any.whl
+/tmp/rcrpy-clean/bin/python python/smoke_install.py
+# (On Windows: c:\path\rcrpy-clean\Scripts\python.exe — adjust accordingly.)
 
 # 5. Install twine if you haven't.
 python -m pip install --upgrade twine
 
 # 6. Upload to TestPyPI FIRST.
-python -m twine upload --repository testpypi python/dist/rcr2-x.y.z*
+python -m twine upload --repository testpypi python/dist/rcrpy-x.y.z*
 
 # 7. Install FROM TestPyPI in another clean venv to confirm the upload.
-python -m venv /tmp/rcr2-from-testpypi
-/tmp/rcr2-from-testpypi/bin/python -m pip install \
+python -m venv /tmp/rcrpy-from-testpypi
+/tmp/rcrpy-from-testpypi/bin/python -m pip install \
     --index-url https://test.pypi.org/simple/ \
     --extra-index-url https://pypi.org/simple/ \
-    rcr2==x.y.z
-# scipy and numpy come from real PyPI (--extra-index-url), rcr2 from
+    rcrpy==x.y.z
+# scipy and numpy come from real PyPI (--extra-index-url), rcrpy from
 # TestPyPI (--index-url).
 
 # 8. If TestPyPI looked good: upload to real PyPI.
-python -m twine upload python/dist/rcr2-x.y.z*
+python -m twine upload python/dist/rcrpy-x.y.z*
 
 # 9. Tag the release in git.
-git tag -a vx.y.z -m "rcr2 vx.y.z"
+git tag -a vx.y.z -m "rcrpy vx.y.z"
 git push origin vx.y.z
 
 # 10. Create a GitHub Release attached to that tag.
@@ -83,7 +83,7 @@ git push origin vx.y.z
 
 ## Version-bump conventions
 
-`rcr2` follows [semver](https://semver.org):
+`rcrpy` follows [semver](https://semver.org):
 
 | Bump | When |
 |---|---|
@@ -104,6 +104,6 @@ issues.
   to pull dependencies from real PyPI.
 - **Wheel is missing a file**: check `MANIFEST.in` and the
   `[tool.setuptools]` sections of `pyproject.toml`. By default
-  setuptools includes everything under `src/rcr2/`, the LICENSE, and
+  setuptools includes everything under `src/rcrpy/`, the LICENSE, and
   the README; if you add files outside that path they may need an
   explicit include.

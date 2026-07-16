@@ -1,4 +1,4 @@
-"""Parity sweep: rcr2 FunctionalForm vs the C++ oracle on cases where
+"""Parity sweep: rcrpy FunctionalForm vs the C++ oracle on cases where
 rejection actually trips, so the MEDIAN / MODE mu_tech paths (and not
 just the MEAN-equivalent regression()) get exercised in both.
 
@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -53,11 +53,11 @@ def _make_contam(N: int, frac_out: float, slope: float, intercept: float,
 
 
 def _port_fit(x, y, tech, weights=None):
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         linear, x, y, [d_linear_b, d_linear_m], guess=[0.0, 0.0],
         weights=weights,
     )
-    r = rcr2.RCR(tech)
+    r = rcrpy.RCR(tech)
     r.set_parametric_model(model)
     if weights is None:
         r.perform_rejection(y.tolist())
@@ -94,8 +94,8 @@ def test_lsmode68_parametric_parity(frac_out, seed):
     code paths run."""
     x, y = _make_contam(N=120, frac_out=frac_out, slope=1.5, intercept=2.0,
                          seed=seed)
-    port_params, port_kept = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68)
-    oracle_params, oracle_kept = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68)
+    port_params, port_kept = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68)
+    oracle_params, oracle_kept = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68)
 
     np.testing.assert_allclose(
         port_params, oracle_params, rtol=RTOL_PARAMS,
@@ -120,7 +120,7 @@ def test_other_techs_parametric_parity(tech_name):
     cross-implementation without a controlled stress workload."""
     x, y = _make_contam(N=120, frac_out=0.15, slope=1.5, intercept=2.0,
                          seed=42)
-    tech = getattr(rcr2.RejectionTech, tech_name)
+    tech = getattr(rcrpy.RejectionTech, tech_name)
     port_params, _ = _port_fit(x, y, tech)
     oracle_params, _ = _oracle_fit(x, y, tech)
     np.testing.assert_allclose(
@@ -141,8 +141,8 @@ def test_weighted_parametric_parity():
     w = np.ones(N)
     w[out] = 0.05  # outliers near-zero-weighted
 
-    port_params, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68, weights=w)
-    oracle_params, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68, weights=w)
+    port_params, _ = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68, weights=w)
+    oracle_params, _ = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68, weights=w)
     np.testing.assert_allclose(
         port_params, oracle_params, rtol=RTOL_PARAMS,
         err_msg=f"weighted: port={port_params!r} oracle={oracle_params!r}",

@@ -1,11 +1,11 @@
-"""Parity: weighted LS_MODE_68 (rcr2 vs legacy rcr) at rtol=1e-12 on
+"""Parity: weighted LS_MODE_68 (rcrpy vs legacy rcr) at rtol=1e-12 on
 data_weighted_singlevalue.csv (N=200)."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -28,7 +28,7 @@ def _run_oracle_w(w_list: list[float], y_list: list[float]) -> dict:
 
 
 def _run_port_w(w_arr: np.ndarray, y_arr: np.ndarray) -> dict:
-    r = rcr2.RCR(rcr2.RejectionTech.LS_MODE_68)
+    r = rcrpy.RCR(rcrpy.RejectionTech.LS_MODE_68)
     r.perform_rejection(y_arr.tolist(), w=w_arr.tolist())
     return {
         "mu": r.result.mu,

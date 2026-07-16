@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import rcr2
+import rcrpy
 
 rcr_oracle = pytest.importorskip("rcr")
 
@@ -89,11 +89,11 @@ def _port_fit(x, y, tech, *, partials, guess, weights=None,
               error_y=None, bulk=False):
     f = partials[0]                              # caller passes (model_fn, partial_list, guess)
     plist = partials[1]
-    model = rcr2.FunctionalForm(
+    model = rcrpy.FunctionalForm(
         f, x, y, plist, guess=guess,
         weights=weights, error_y=error_y,
     )
-    r = rcr2.RCR(tech)
+    r = rcrpy.RCR(tech)
     r.set_parametric_model(model)
     args = {"w": weights.tolist()} if weights is not None else {}
     if bulk:
@@ -147,9 +147,9 @@ def test_bulk_parametric_parity_lsmode68(frac_out, seed):
     x, y = _make_contam_linear(N=120, frac_out=frac_out, slope=1.5,
                                 intercept=2.0, seed=seed)
     parts = (linear, [d_linear_b, d_linear_m])
-    port_p, port_flags = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, port_flags = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                                     partials=parts, guess=[0.0, 0.0], bulk=True)
-    or_p, or_flags = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, or_flags = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                                   partials=parts, guess=[0.0, 0.0], bulk=True)
 
     np.testing.assert_allclose(
@@ -166,42 +166,28 @@ def test_bulk_parametric_parity_lsmode68(frac_out, seed):
 
 # ---- ES_MODE_DL retry -----------------------------------------------------
 
-@pytest.mark.xfail(
-    reason=(
-        "ES_MODE_DL + parametric is broken in BOTH implementations — this "
-        "is an algorithm bug inherited from the C++ source, not a port "
-        "deficiency. CHARACTERIZATION (2026-05-21): on clean linear data "
-        "with N=200 and ZERO contamination, the C++ oracle still rejects "
-        "~75% of inliers, ending with ~48 points kept and a 7-10% "
-        "parameter error. The pattern holds across contamination levels: "
-        "the each-sigma rejection loop drives sigma_below/sigma_above "
-        "downward each iteration, causing more rejections, lower sigmas, "
-        "more rejections — a runaway rejection cascade with no proper "
-        "convergence floor. EARLIER (incorrect) HYPOTHESES that this was "
-        "an RNG divergence (Option B fixed combo sampling, no effect) or "
-        "a float-summation-order issue (made fitDL_w/mFinder_w/"
-        "getOriginFixedRegressionLine_w sequential to match C++ exactly, "
-        "no effect on the test) were both ruled out empirically. The "
-        "remaining ~10% port-vs-oracle disagreement is now understood as "
-        "the port being marginally more aggressive in its (also-broken) "
-        "rejection cascade. FIX would require redesigning the each-sigma "
-        "convergence criterion to stop the runaway — a Phase 3 algorithm "
-        "enhancement, not a porting task. The other three rejection "
-        "techniques (LS_MODE_68, LS_MODE_DL, SS_MEDIAN_DL) work correctly "
-        "with parametric models, so users should use those. See "
-        "benchmarks/es_mode_dl_truth_test.py for the truth-recovery "
-        "comparison and [[rcr2-parity-by-code-path]] memory for details."
-    ),
-    strict=True,
-)
 def test_es_mode_dl_parametric_parity():
-    """ES_MODE_DL + parametric. See xfail rationale above."""
+    """ES_MODE_DL + parametric: port == oracle.
+
+    This was an xfail(strict) until 2026-07-10: the port's each-sigma rejection
+    cascade drifted ~10% from the oracle's (both share the inherited runaway
+    that over-rejects inliers, but the port was marginally more aggressive).
+    Root cause: the port's rejection guard used the 2-arg
+    ``distinctValuesCheck(flags, y)`` on the raw residuals for ALL models,
+    whereas the C++, for a PARAMETRIC model, uses the 3-arg
+    ``distinctValuesCheck(paramCount, flags, trueY)`` (RCR.cpp:168) on the
+    compacted residual vector — which stops the peel earlier. Porting that
+    3-arg parametric guard (``stats.distinctValuesCheckParam``, threaded through
+    ``_reject``/``_bulk_reject``) aligns the cascades so the port now tracks the
+    oracle here as well as on the LS_MODE_* / SS_MEDIAN_DL parametric paths.
+    The underlying each-sigma algorithm is still truth-broken (see
+    benchmarks/es_mode_dl_truth_test.py), but PARITY now holds."""
     x, y = _make_contam_linear(N=150, frac_out=0.10, slope=1.0,
                                 intercept=3.0, seed=2026)
     parts = (linear, [d_linear_b, d_linear_m])
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.ES_MODE_DL,
+    port_p, _ = _port_fit(x, y, rcrpy.RejectionTech.ES_MODE_DL,
                            partials=parts, guess=[0.0, 0.0])
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.ES_MODE_DL,
+    or_p, _ = _oracle_fit(x, y, rcrpy.RejectionTech.ES_MODE_DL,
                            partials=parts, guess=[0.0, 0.0])
     np.testing.assert_allclose(
         port_p, or_p, rtol=RTOL_PARAMS,
@@ -219,9 +205,9 @@ def test_quadratic_parametric_parity():
     parts = (quadratic, [d_quad_a0, d_quad_a1, d_quad_a2])
     # Use a sensible non-zero guess; far-from-truth guesses can derail
     # scipy.optimize.least_squares on quadratics.
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, _ = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.5, 0.0, 0.1])
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, _ = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.5, 0.0, 0.1])
     np.testing.assert_allclose(
         port_p, or_p, rtol=RTOL_PARAMS,
@@ -247,10 +233,10 @@ def test_error_bars_parametric_parity():
     y[out_idx] += rng.normal(8.0, 2.0, size=12)
 
     parts = (linear, [d_linear_b, d_linear_m])
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, _ = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0],
                            error_y=sigma_y)
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, _ = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0],
                            error_y=sigma_y)
     np.testing.assert_allclose(
@@ -273,9 +259,9 @@ def test_truth_recovery_both_implementations():
                                 intercept=truth[0], seed=7777)
     parts = (linear, [d_linear_b, d_linear_m])
 
-    port_p, _ = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    port_p, _ = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0])
-    or_p, _ = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    or_p, _ = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                            partials=parts, guess=[0.0, 0.0])
 
     # Both should recover within ~10% of truth (loose to allow for finite N).
@@ -299,9 +285,9 @@ def test_kept_set_indices_overlap():
                                 intercept=2.0, seed=999)
     parts = (linear, [d_linear_b, d_linear_m])
 
-    _, port_flags = _port_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    _, port_flags = _port_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                                partials=parts, guess=[0.0, 0.0])
-    _, or_flags = _oracle_fit(x, y, rcr2.RejectionTech.LS_MODE_68,
+    _, or_flags = _oracle_fit(x, y, rcrpy.RejectionTech.LS_MODE_68,
                                partials=parts, guess=[0.0, 0.0])
 
     port_kept = set(np.where(port_flags)[0])
