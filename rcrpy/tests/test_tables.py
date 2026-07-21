@@ -1,7 +1,7 @@
 """Regression test: the unity tables in rcrpy.tables must hash to the exact
 byte-values they had when extracted from cpp/src/RCR.cpp.
 
-The tables are float-literal data copied (via rcrpy/scripts/extract_unity_tables.py)
+The tables are float-literal data copied (via python/scripts/extract_unity_tables.py)
 straight from the C++ source. They have no semantic meaning we can test
 independently of the rejection loops, so we lock their bytes with SHA-256
 to guard against accidental edits.

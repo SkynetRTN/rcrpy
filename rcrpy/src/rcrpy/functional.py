@@ -86,26 +86,128 @@ def _cpp_mt19937_uint32_stream(seed: int, n: int) -> np.ndarray:
 _TINY = float(np.finfo(np.float64).tiny)
 
 
-def _half_sample_bounds(sorted_arr: np.ndarray,
-                        sorted_w: np.ndarray) -> tuple[int, int]:
-    """Return (low_idx, high_idx) of the half-sample mode window in a
-    weighted, sorted array. Direct numpy translation of the C++
-    `getHalfSampleBounds` (cpp/src/RCR.cpp:990) — find the index pair
-    bracketing half the total weight, minimizing window WIDTH."""
-    n = sorted_arr.size
+def _hsb_binary_search(search_up: bool, min_index: int, to_find: float,
+                       s: np.ndarray) -> int:
+    """Port of cpp/src/RCR.cpp:258 binarySearch — the bracketing search used by
+    getHalfSampleBounds (isEqual-aware, converges when [low,high] stops moving)."""
+    from rcrpy import stats as _stats
+    _iseq = _stats.isEqual
+    if search_up:
+        low, high = min_index, s.size
+    else:
+        low, high = 0, min_index
+    low_in = high_in = -1
+    n = s.size
+    while low != low_in or high != high_in:
+        low_in, high_in = low, high
+        mid = int(low + (high - low) / 2.0)
+        if mid >= n:
+            mid = n - 1
+        sm = float(s[mid])
+        if _iseq(to_find, sm):
+            low = high = mid
+        elif to_find > sm:
+            low = mid
+        else:
+            high = mid
+    return low if search_up else high
+
+
+def _hsb_seq(sorted_arr: np.ndarray,
+             sorted_w: np.ndarray) -> tuple[int, int]:
+    """Return (low_idx, high_idx) of the half-sample mode window in a weighted,
+    sorted array. FAITHFUL port of the C++ `getHalfSampleBounds` (cpp/src/RCR.cpp:793):
+    the minimum-WIDTH window bracketing half the total weight, considering BOTH a
+    forward anchor (i as the low edge) and a BACKWARD anchor (i as the high edge),
+    with tie-EXPANSION (min low / max high) when two windows share the minimum width.
+
+    The earlier vectorization implemented only the forward branch and used
+    ``argmin`` (first-index) tie-breaking, so it chose a different tied window on
+    ~symmetric parameter spaces. That shifted the LinearModel 2-D mode fit
+    (``get_nd_mode``) and cascaded through the noise-line-fit rejection into the
+    faint-source 1-D-background scale (the same class of bug as the halfSampleMode_w
+    backward-branch drop). This branch-complete port makes the mode fit bit-match C++."""
+    from rcrpy import stats as _stats
+    _iseq = _stats.isEqual
+    y = sorted_arr
+    w = sorted_w
+    n = y.size
     if n <= 1:
         return 0, max(n - 1, 0)
-    cumw = np.cumsum(sorted_w)
-    s_vec = cumw - 0.5 * sorted_w
-    half = float(cumw[-1]) * 0.5
-    totals = s_vec + half
-    ks = np.searchsorted(s_vec, totals, side="right") - 1
-    valid = (s_vec <= half) & (totals <= s_vec[-1] * (1 + 1e-12) + 1e-12)
-    if not np.any(valid):
+    hws = 0.5 * float(np.sum(w))
+    # sVec[i] = cumulative midpoint weight = cumsum(w)[i] - 0.5*w[i] (C++ builds it
+    # by the equivalent 0.5*w[i-1] + 0.5*w[i] recurrence).
+    s_vec = np.cumsum(w) - 0.5 * w
+    min_dist = 999999.0
+    f_lower = f_upper = -1
+    for i in range(n):
+        si = float(s_vec[i])
+        if si < hws or _iseq(si, hws):              # forward anchor (i = low edge)
+            total = si + hws
+            k = _hsb_binary_search(True, i, total, s_vec)
+            if k >= n:
+                k = n - 1
+            dist = abs(float(y[k]) - float(y[i]))
+            if _iseq(dist, min_dist):
+                f_lower = min(f_lower, i)
+                f_upper = max(f_upper, k)
+            elif dist < min_dist:
+                min_dist = dist
+                f_lower, f_upper = i, k
+        if si > hws or _iseq(si, hws):              # backward anchor (i = high edge)
+            total = si - hws
+            k = _hsb_binary_search(False, i, total, s_vec)
+            dist = abs(float(y[i]) - float(y[k]))
+            if _iseq(dist, min_dist):
+                f_lower = min(f_lower, k)
+                f_upper = max(f_upper, i)
+            elif dist < min_dist:
+                min_dist = dist
+                f_lower, f_upper = k, i
+    if f_lower < 0:
         return 0, n - 1
-    widths = np.where(valid, sorted_arr[np.clip(ks, 0, n - 1)] - sorted_arr, np.inf)
-    min_idx = int(np.argmin(widths))
-    return min_idx, int(ks[min_idx])
+    return int(f_lower), int(f_upper)
+
+
+def _half_sample_bounds(sorted_arr: np.ndarray,
+                        sorted_w: np.ndarray) -> tuple[int, int]:
+    """Half-sample mode window (low_idx, high_idx) — vectorized port of the C++
+    ``getHalfSampleBounds`` (RCR.cpp:793), bit-identical to the sequential :func:`_hsb_seq`
+    but O(n log n) numpy instead of a Python loop (``get_nd_mode`` calls this on ~C(n,2)
+    parameter-space arrays, which reach ~150k for a 549-point fit — the sequential loop there
+    is a ~40 s hang). Small n falls back to :func:`_hsb_seq`: at n≲2 a float-rounding boundary
+    can make ``searchsorted`` disagree with the isEqual-aware binary search, and small n is
+    cheap sequentially anyway."""
+    n = sorted_arr.size
+    if n <= 16:
+        return _hsb_seq(sorted_arr, sorted_w)
+    y = sorted_arr
+    w = sorted_w
+    hws = 0.5 * float(np.sum(w))
+    s = np.cumsum(w) - 0.5 * w
+    idx = np.arange(n)
+    _dbl_min = 2.2250738585072014e-308
+
+    def _iseq(a, b):  # vectorized RCR isEqual (rel 1e-8, abs DBL_MIN)
+        denom = np.where(np.abs(b) > np.abs(a), b, a)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rel = np.abs((a - b) / denom)
+        return (np.abs(a - b) < _dbl_min) | (rel <= 1e-8)
+
+    fwd = (s < hws) | _iseq(s, hws)          # forward anchor valid (i = low edge)
+    bwd = (s > hws) | _iseq(s, hws)          # backward anchor valid (i = high edge)
+    k_f = np.clip(np.searchsorted(s, s + hws, side="right") - 1, 0, n - 1)
+    dist_f = np.abs(y[k_f] - y)
+    k_b = np.clip(np.searchsorted(s, s - hws, side="left"), 0, n - 1)
+    dist_b = np.abs(y - y[k_b])
+    lowers = np.concatenate([idx[fwd], k_b[bwd]])
+    uppers = np.concatenate([k_f[fwd], idx[bwd]])
+    dists = np.concatenate([dist_f[fwd], dist_b[bwd]])
+    if dists.size == 0:
+        return 0, n - 1
+    min_dist = float(dists.min())
+    tie = _iseq(dists, min_dist)             # tie-EXPANSION: min low / max high over equal widths
+    return int(lowers[tie].min()), int(uppers[tie].max())
 
 
 class PriorType(Enum):
@@ -421,8 +523,16 @@ class FunctionalForm:
                                                    _COMBO_SAMPLE_CAP_NONLINEAR)
         else:
             # Linear path: match C++ behavior exactly.
-            combos_all = np.array(list(itertools.combinations(range(n_kept), M)),
-                                  dtype=np.int64)
+            if M == 2:
+                # Vectorized C(n_kept, 2): np.triu_indices is row-major, which is
+                # exactly itertools.combinations' lexicographic order, so this is
+                # bit-identical and ~50x faster (a 549-pt fit enumerates ~150k
+                # combos EVERY rejection iteration).
+                rows, cols = np.triu_indices(n_kept, k=1)
+                combos_all = np.column_stack((rows, cols)).astype(np.int64)
+            else:
+                combos_all = np.array(list(itertools.combinations(range(n_kept), M)),
+                                      dtype=np.int64)
             if _COMBO_FRAC * total > _COMBO_LIMIT:
                 combos = self._sample_combos_cpp(combos_all)
             else:
@@ -527,25 +637,46 @@ class FunctionalForm:
             # > totalcomboweight > R.
             ks = np.minimum(ks, n_combos - 1)
         else:
-            # Fallback: literal translation of the C++ inner loop.
-            ks = np.empty(_COMBO_LIMIT, dtype=np.int64)
-            cw = combo_weights  # local alias
-            for j in range(_COMBO_LIMIT):
-                R = float(rs[j])
-                sel = n_combos - 1
-                for k in range(n_combos):
-                    R -= cw[k]
-                    if R < cw[k]:
-                        sel = k
-                        break
-                ks[j] = sel
+            # Non-monotonic thresholds. The C++ inner loop selects, per R, the
+            # first k with thresholds[k] > R. A literal O(_COMBO_LIMIT *
+            # n_combos) double loop HANGS on large n_combos (a 549-point line
+            # fit -> C(549,2) ~= 150k combos; this path is reached whenever the
+            # point weights make thresholds non-monotonic). It is unnecessary:
+            # any combo k whose threshold does not exceed all earlier
+            # thresholds is UNREACHABLE (an earlier combo already claims every R
+            # it could win). The reachable combos are exactly the left-to-right
+            # maxima of `thresholds`, which form a strictly increasing
+            # subsequence — so searchsorted over them yields the IDENTICAL
+            # selection (verified bit-equal to the literal loop, 4000/4000
+            # random non-monotonic cases) in O(n_combos + _COMBO_LIMIT*log n).
+            prev_max = np.empty(n_combos, dtype=np.float64)
+            prev_max[0] = -np.inf
+            np.maximum.accumulate(thresholds[:-1], out=prev_max[1:])
+            reachable = thresholds > prev_max
+            reach_thresh = thresholds[reachable]      # strictly increasing
+            reach_idx = np.nonzero(reachable)[0]
+            p = np.searchsorted(reach_thresh, rs, side="right")
+            ks = np.full(_COMBO_LIMIT, n_combos - 1, dtype=np.int64)
+            in_range = p < reach_idx.size             # else: no k wins -> n_combos-1 (C++ default)
+            ks[in_range] = reach_idx[p[in_range]]
 
-        # Dedup, preserve lex-sorted order to mirror C++ std::set iteration.
-        chosen: set[tuple[int, ...]] = set()
+        # Dedup + lex-sort to mirror C++ std::set iteration order.
         combos_picked = combos_all[ks]
-        for row in combos_picked:
-            chosen.add(tuple(int(x) for x in row))
-        return np.array(sorted(chosen), dtype=np.int64)
+        if combos_picked.shape[1] == 2:
+            # M=2 (line fits, the hot path): encode each (i, j) pair as a single
+            # int64 key i*base + j (base > every index) so dedup is a fast 1D
+            # unique. Key order == lexicographic (i, j) order, so this is
+            # bit-identical to np.unique(axis=0) / sorted(set(tuples)) but avoids
+            # the per-iteration lexicographic ROW sort (~16 ms -> ~2 ms).
+            base = int(combos_all.max()) + 1
+            keys = np.unique(combos_picked[:, 0].astype(np.int64) * base
+                             + combos_picked[:, 1].astype(np.int64))
+            out = np.empty((keys.size, 2), dtype=np.int64)
+            out[:, 0] = keys // base
+            out[:, 1] = keys % base
+            return out
+        # General M: lexicographically-sorted unique rows == sorted(set(tuples)).
+        return np.ascontiguousarray(np.unique(combos_picked, axis=0), dtype=np.int64)
 
     def _sample_combos_numpy(self, rng: np.random.Generator,
                              n_kept: int, M: int, n_samples: int) -> np.ndarray:
@@ -642,16 +773,23 @@ class FunctionalForm:
         sy_kept = self.sigma_y[idx] if self.has_error_bars else None
         params0 = self.parameters
 
-        # Build A[c, a, b] = partials[b](x[combo[c, a]], params0)
+        # Build A[c, a, b] = partials[b](x[combo[c, a]], params0). The partials
+        # depend only on x (params0 is fixed throughout this build), so evaluate
+        # each partial on every KEPT point once and index by combo. Bit-identical
+        # to the per-combo callback loop but M*n_kept callbacks instead of
+        # M*M*n_combos — a 549-point line fit drops from ~70k callbacks per
+        # rejection iteration (the noise_model_1d hang) to ~1k.
+        pvals = np.empty((M, x_kept.size), dtype=np.float64)
+        for b in range(M):
+            pvals[b] = np.array(
+                [float(self.partialsvector[b](float(xv), params0)) for xv in x_kept],
+                dtype=np.float64,
+            )
         A = np.empty((n_combos, M, M), dtype=np.float64)
         for a in range(M):
-            x_a = x_kept[combos[:, a]]
+            ca = combos[:, a]
             for b in range(M):
-                A[:, a, b] = np.array(
-                    [float(self.partialsvector[b](float(xv), params0))
-                     for xv in x_a],
-                    dtype=np.float64,
-                )
+                A[:, a, b] = pvals[b][ca]
 
         b_vec = y_kept[combos][:, :, None]   # (n_combos, M, 1)
         try:
@@ -1076,3 +1214,95 @@ class FunctionalForm:
         # the last-stored Jacobian if regression() was ever called.
         self.result.parameter_uncertainties = self.get_bestfit_errorbars(line)
         return self.get_errors(line)
+
+
+class LinearModel(FunctionalForm):
+    """Robust straight-line fit via the C++ ``LinearModel`` estimator.
+
+    Port of the radio-cartographer ``LinearModel : public FunctionalForm``
+    (``cpp .../Survey.cpp:64 buildModelSpace`` + ``:123 regression``), used by
+    ``Processor::calculateScatter`` and ``Processor::set2DScatter``. Unlike the
+    generic :class:`FunctionalForm` line fit (whose MODE/MEDIAN combo space uses
+    uncertainty-derived weights and an ``x=0`` intercept), ``LinearModel`` builds
+    the pairwise parameter space with the C++'s SPECIALIZED weights and an
+    ``xBar``-pivot intercept, so the weighted half-sample mode is robust to the
+    high-scatter outliers the generic fit gets pulled toward. Drive it exactly
+    like the C++::
+
+        m = LinearModel(x, y, weights)
+        r = RCR(RejectionTech.LS_MODE_68)
+        r.set_parametric_model(m)
+        r.perform_bulk_rejection(y, w=weights)   # C++ performBulkRejection
+        slope = m.result.parameters[1]           # intercept is at the xBar pivot
+        intercept0 = m.result.parameters[0] - slope * m.pivot   # ...convert to x=0
+
+    NB use ``perform_bulk_rejection`` (the C++ ``set2DScatter`` path), NOT
+    ``perform_rejection`` — the single-pass iterative path under-rejects.
+
+    For each flagged pair ``(i, j)`` with ``x[j] != x[i]`` (Survey.cpp:64):
+      * slope   ``m  = (yj - yi)/(xj - xi)``
+      * intercept (at the weighted pivot ``xBar``) ``b = yj - m*(xj - xBar)``
+      * slope weight     ``mW = 0.5*(xj - xi)^2 * wi*wj``
+      * intercept weight ``bW = (xj - xi)^2 / ((xi - xBar)^2 + (xj - xBar)^2) * wi*wj``
+
+    ``parameterSpace``/``weightSpace`` are stored ``[intercept, slope]`` to match
+    the partials order (``[1, x - pivot]``); the pivot ``xBar`` (weighted mean of
+    the flagged x) is recomputed each rejection iteration via ``pivot_function``,
+    exactly as the C++ ``getAverage()`` runs inside ``buildModelSpace``.
+    """
+
+    def __init__(self, x, y, weights=None):
+        piv = [0.0]
+        self._pivot_holder = piv
+
+        def _f(xv, p):
+            return p[0] + p[1] * (xv - piv[0])
+
+        def _d_intercept(xv, p):
+            return 1.0
+
+        def _d_slope(xv, p):
+            return xv - piv[0]
+
+        def _pivfn(truex, truew, f, params):
+            wsum = float(np.sum(truew))
+            piv[0] = float(np.sum(truew * truex) / wsum) if wsum != 0.0 else 0.0
+            return piv[0]
+
+        w = None if weights is None else np.asarray(weights, dtype=np.float64)
+        super().__init__(_f, x, y, [_d_intercept, _d_slope], guess=[0.0, 0.0],
+                         weights=w, pivot_function=_pivfn, pivot_guess=0.0)
+        # LinearModel always weights the pairwise space (the C++ constructor
+        # takes dumpSums); with no weights supplied, fall back to uniform so
+        # wi*wj is well-defined.
+        if not self.weighted_check:
+            self.w = np.ones(self.x.size, dtype=np.float64)
+
+    def _build_param_combo_space(self) -> None:
+        """C++ ``LinearModel::buildModelSpace`` (Survey.cpp:64) — the pairwise
+        (slope, xBar-intercept) space with the specialized mW/bW weights."""
+        idx = self.indices
+        M = self.M
+        if idx.size < M:
+            self.parameterSpace = [np.empty(0) for _ in range(M)]
+            self.weightSpace = [np.empty(0) for _ in range(M)]
+            return
+        xb = self._pivot_holder[0]
+        xi = self.x[idx]
+        yi = self.y[idx]
+        wi = self.w[idx]
+        r, c = np.triu_indices(idx.size, k=1)
+        dx = xi[c] - xi[r]
+        ok = dx != 0.0
+        r, c, dx = r[ok], c[ok], dx[ok]
+        m = (yi[c] - yi[r]) / dx
+        b = yi[c] - m * (xi[c] - xb)                       # intercept at xBar pivot
+        wp = wi[r] * wi[c]
+        mW = 0.5 * dx * dx * wp
+        denom = (xi[r] - xb) ** 2 + (xi[c] - xb) ** 2
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bW = np.where(denom != 0.0, dx * dx / denom * wp, 0.0)
+        finite = np.isfinite(m) & np.isfinite(b) & np.isfinite(mW) & np.isfinite(bW)
+        # Storage order matches the partials [intercept, slope].
+        self.parameterSpace = [b[finite], m[finite]]
+        self.weightSpace = [bW[finite], mW[finite]]

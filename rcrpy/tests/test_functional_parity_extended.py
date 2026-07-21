@@ -166,36 +166,22 @@ def test_bulk_parametric_parity_lsmode68(frac_out, seed):
 
 # ---- ES_MODE_DL retry -----------------------------------------------------
 
-@pytest.mark.xfail(
-    reason=(
-        "ES_MODE_DL + parametric is broken in BOTH implementations — this "
-        "is an algorithm bug inherited from the C++ source, not a port "
-        "deficiency. CHARACTERIZATION (2026-05-21): on clean linear data "
-        "with N=200 and ZERO contamination, the C++ oracle still rejects "
-        "~75% of inliers, ending with ~48 points kept and a 7-10% "
-        "parameter error. The pattern holds across contamination levels: "
-        "the each-sigma rejection loop drives sigma_below/sigma_above "
-        "downward each iteration, causing more rejections, lower sigmas, "
-        "more rejections — a runaway rejection cascade with no proper "
-        "convergence floor. EARLIER (incorrect) HYPOTHESES that this was "
-        "an RNG divergence (Option B fixed combo sampling, no effect) or "
-        "a float-summation-order issue (made fitDL_w/mFinder_w/"
-        "getOriginFixedRegressionLine_w sequential to match C++ exactly, "
-        "no effect on the test) were both ruled out empirically. The "
-        "remaining ~10% port-vs-oracle disagreement is now understood as "
-        "the port being marginally more aggressive in its (also-broken) "
-        "rejection cascade. FIX would require redesigning the each-sigma "
-        "convergence criterion to stop the runaway — a Phase 3 algorithm "
-        "enhancement, not a porting task. The other three rejection "
-        "techniques (LS_MODE_68, LS_MODE_DL, SS_MEDIAN_DL) work correctly "
-        "with parametric models, so users should use those. See "
-        "benchmarks/es_mode_dl_truth_test.py for the truth-recovery "
-        "comparison and [[rcrpy-parity-by-code-path]] memory for details."
-    ),
-    strict=True,
-)
 def test_es_mode_dl_parametric_parity():
-    """ES_MODE_DL + parametric. See xfail rationale above."""
+    """ES_MODE_DL + parametric: port == oracle.
+
+    This was an xfail(strict) until 2026-07-10: the port's each-sigma rejection
+    cascade drifted ~10% from the oracle's (both share the inherited runaway
+    that over-rejects inliers, but the port was marginally more aggressive).
+    Root cause: the port's rejection guard used the 2-arg
+    ``distinctValuesCheck(flags, y)`` on the raw residuals for ALL models,
+    whereas the C++, for a PARAMETRIC model, uses the 3-arg
+    ``distinctValuesCheck(paramCount, flags, trueY)`` (RCR.cpp:168) on the
+    compacted residual vector — which stops the peel earlier. Porting that
+    3-arg parametric guard (``stats.distinctValuesCheckParam``, threaded through
+    ``_reject``/``_bulk_reject``) aligns the cascades so the port now tracks the
+    oracle here as well as on the LS_MODE_* / SS_MEDIAN_DL parametric paths.
+    The underlying each-sigma algorithm is still truth-broken (see
+    benchmarks/es_mode_dl_truth_test.py), but PARITY now holds."""
     x, y = _make_contam_linear(N=150, frac_out=0.10, slope=1.0,
                                 intercept=3.0, seed=2026)
     parts = (linear, [d_linear_b, d_linear_m])

@@ -41,6 +41,11 @@ docs = [
     "furo",
     "myst-parser",
 ]
+# Optional Numba JIT acceleration of the DL-sigma kernels (rcrpy.enable_fast()).
+# Pure-Python remains the bit-exact default; this only adds speed.
+fast = [
+    "numba>=0.59",
+]
 
 [project.urls]
 Homepage = "https://github.com/SkynetRTN/rcrpy"

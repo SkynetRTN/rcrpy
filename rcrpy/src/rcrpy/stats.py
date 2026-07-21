@@ -60,13 +60,20 @@ def erfcCustom(x: float) -> float:
         return 0.0
 
 
+# DBL_MIN (~2.2e-308). Hoisted to module scope: np.finfo(float).tiny constructs
+# a finfo object, and isEqual is called ~466k times per cornifer pipeline — so
+# rebuilding it per call was ~0.4s of pure waste (485k finfo.__new__). The value
+# is identical, so this is bit-neutral.
+_DBL_MIN = float(np.finfo(np.float64).tiny)
+
+
 def isEqual(x: float, y: float,
             max_relative_error: float = 1e-8,
             max_absolute_error: float | None = None) -> bool:
     """Port of cpp/src/RCR.cpp:206. Default abs tolerance is DBL_MIN, which is
     effectively zero — only the relative error path matters."""
     if max_absolute_error is None:
-        max_absolute_error = np.finfo(float).tiny  # ~DBL_MIN
+        max_absolute_error = _DBL_MIN  # ~DBL_MIN, computed once at import
     if abs(x - y) < max_absolute_error:
         return True
     if abs(y) > abs(x):
@@ -85,7 +92,7 @@ def isEqual_vec_scalar(a: np.ndarray, b: float,
     Returns a bool ndarray the same shape as a.
     """
     a = np.asarray(a, dtype=np.float64)
-    tiny = np.finfo(np.float64).tiny
+    tiny = _DBL_MIN  # module constant; avoids per-call np.finfo construction
     diff = np.abs(a - b)
     abs_a = np.abs(a)
     abs_b = abs(b)
@@ -180,16 +187,23 @@ def _binarySearch(search_up: bool, minimum_index: int, to_find: float, to_search
 def halfSampleMode_w(w: np.ndarray, y: np.ndarray) -> float:
     """Port of cpp/src/RCR.cpp:531 — getMode(trueCount, w, y), weighted.
 
-    Vectorized. The C++ inner loop builds the cumulative half-weight vector
-        s_vec[i] = w[0] + w[1] + ... + w[i-1] + 0.5 * w[i]
-    (with the lower-bound offset), then for each i searches for the matching
-    forward (branch 1) or backward (branch 2) k whose s_vec[k] differs from
-    s_vec[i] by `half_weight_sum`. Branches 1 and 2 together iterate the same
-    set of (i, k) endpoint pairs from both ends; vectorizing the forward
-    sweep alone gives the same min-distance answer.
+    The C++ builds the cumulative half-weight vector
+        s_vec[i] = 0.5*w[lower] + w[lower+1] + ... + w[i-1] + 0.5*w[i]
+    then, for every i, considers TWO candidate windows:
+      * branch 1 (forward):  anchor the LOW end at i, extend up to the last k
+        with s_vec[k] <= s_vec[i] + halfWeightSum.  Window [i, k].
+      * branch 2 (backward): anchor the HIGH end at i, extend down to the
+        first k with s_vec[k] >= s_vec[i] - halfWeightSum.  Window [k, i].
+    It picks the minimum-width window (by |y| span), expanding across isEqual
+    ties via min(finalLower)/max(finalUpper).
 
-    Replacing the linear search with `np.searchsorted(side='right')` is
-    correct because s_vec is monotonically non-decreasing (positive weights).
+    IMPORTANT: both branches are required. A forward-only sweep silently drops
+    the upper-anchored windows (e.g. [mid, top] on odd-size ranges), which
+    makes the weighted mode disagree with the unweighted mode even at uniform
+    weights and breaks parity with the C++ on LS_MODE_68 / LS_MODE_DL /
+    ES_MODE_DL weighted runs. Both branches are vectorized here; s_vec is
+    monotonically non-decreasing (positive weights), so searchsorted replaces
+    the C++ linear k-search.
     """
     n = y.size
     lower_limit, upper_limit = 0, n - 1
@@ -205,50 +219,50 @@ def halfSampleMode_w(w: np.ndarray, y: np.ndarray) -> float:
 
         y_win = y[lower_limit:upper_limit + 1]
         w_win = w[lower_limit:upper_limit + 1]
+        idx = np.arange(size)
 
         cumw = np.cumsum(w_win)
         s_vec = cumw - 0.5 * w_win
-        half_weight_sum = float(cumw[-1]) * 0.5
+        hws = float(cumw[-1]) * 0.5
 
-        # Branch 1 forward sweep: for each i, find largest k with
-        # s_vec[k] <= s_vec[i] + half_weight_sum. searchsorted with
-        # side='right' returns the *first* index where the value would be
-        # inserted to keep sorted order; subtract 1 to get the LAST index
-        # that's <= the target. This matches the C++ linear forward search
-        # (where the loop advances while still <= total, then steps back).
-        totals = s_vec + half_weight_sum
-        ks = np.searchsorted(s_vec, totals, side="right") - 1
+        # Branch 1 (forward): valid where s_vec[i] <= hws (isEqual-tolerant).
+        # k1[i] = last index with s_vec[k] <= s_vec[i] + hws (tolerant). The
+        # +tol nudge includes C++ isEqual matches just above the threshold.
+        totals1 = s_vec + hws
+        k1 = np.searchsorted(s_vec, totals1 + REL_TOL * np.abs(totals1),
+                             side="right") - 1
+        k1 = np.clip(k1, 0, size - 1)
+        valid1 = s_vec <= hws + REL_TOL * abs(hws)
+        dist1 = np.where(valid1, np.abs(y_win[k1] - y_win), np.inf)
 
-        # Valid i values (branch 1 fires): s_vec[i] <= half_weight_sum
-        # (with isEqual relative tolerance). For i past that, s_vec[i] + hws
-        # exceeds the maximum s_vec value, ks[i] saturates at size-1, and
-        # those candidates are dominated by branch-2-equivalent windows that
-        # branch-1 already considered with smaller i. Mask them out.
-        valid_b1 = (s_vec < half_weight_sum) | (
-            np.abs(s_vec - half_weight_sum) <= REL_TOL * abs(half_weight_sum)
-        )
-        # Also drop i where the forward window doesn't reach the requested
-        # weight (totals > s_vec[-1] beyond isEqual tolerance — symmetrically
-        # those are covered by branch 2 from larger i).
-        within_range = totals <= s_vec[-1] * (1.0 + REL_TOL) + REL_TOL
-        valid = valid_b1 & within_range
+        # Branch 2 (backward): valid where s_vec[i] >= hws (isEqual-tolerant).
+        # k2[i] = first index with s_vec[k] >= s_vec[i] - hws (tolerant).
+        totals2 = s_vec - hws
+        k2 = np.searchsorted(s_vec, totals2 - REL_TOL * np.abs(totals2),
+                             side="left")
+        k2 = np.clip(k2, 0, size - 1)
+        valid2 = s_vec >= hws - REL_TOL * abs(hws)
+        dist2 = np.where(valid2, np.abs(y_win - y_win[k2]), np.inf)
 
-        distances = np.where(valid, np.abs(y_win[ks] - y_win), np.inf)
-        min_dist = float(np.min(distances))
+        # Combine both branches' candidate windows. lo/hi are the window
+        # endpoints; branch 1 is [i, k1], branch 2 is [k2, i].
+        all_dist = np.concatenate([dist1, dist2])
+        all_lo = np.concatenate([idx, k2])
+        all_hi = np.concatenate([k1, idx])
+
+        min_dist = float(np.min(all_dist))
         if not np.isfinite(min_dist):
             break  # degenerate; shouldn't occur for positive weights
 
         if min_dist == 0.0:
-            tied = (distances == 0.0)
+            tied = (all_dist == 0.0)
         else:
-            tied = np.abs(distances - min_dist) <= REL_TOL * abs(min_dist)
-        tied_idx = np.where(tied)[0]
+            tied = np.abs(all_dist - min_dist) <= REL_TOL * abs(min_dist)
 
-        final_lower = int(tied_idx[0]) + lower_limit
-        # Across ties, take the maximum upper endpoint (mirrors the
-        # max(finalUpper, ...) expansion in the C++).
-        final_upper = int(np.max(ks[tied_idx])) + lower_limit
-
+        # Expand the chosen range across ties: min lower / max upper endpoint
+        # (mirrors the C++ min(finalLower)/max(finalUpper) accumulation).
+        final_lower = int(np.min(all_lo[tied])) + lower_limit
+        final_upper = int(np.max(all_hi[tied])) + lower_limit
         lower_limit, upper_limit = final_lower, final_upper
 
     window_y = y[lower_limit:upper_limit + 1]
@@ -258,7 +272,14 @@ def halfSampleMode_w(w: np.ndarray, y: np.ndarray) -> float:
 
 def inverf(x: float) -> float:
     """Port of cpp/src/RCR.cpp:187. RCR's custom inverse-erf approximation.
-    Do NOT replace with scipy.special.erfinv — see notes on erfcCustom."""
+    Do NOT replace with scipy.special.erfinv — see notes on erfcCustom.
+
+    NOTE: kept as a scalar function on purpose. The C++ uses ``pow(t, 2)`` here;
+    the scalar Python ``t ** 2`` reproduces that bit-for-bit, but NumPy has no
+    way to apply libm ``pow`` elementwise (it lowers exponent-2 to a multiply),
+    so a vectorized form drifts ~1 ULP from the oracle and can flip a rejection
+    boundary. Speed for this hotspot comes from the optional Numba JIT
+    (rcrpy._fast), which keeps the scalar form and is therefore bit-exact."""
     PI = 3.1415926535897932384626434
     inverf_mult = (8.0 * (PI - 3.0)) / (3 * PI * (4.0 - PI))
     sqrt2 = math.sqrt(2.0)
@@ -281,7 +302,12 @@ def countAmountLessThanOne(x: np.ndarray) -> int:
 
 def getXVec_w(size: int, w: np.ndarray) -> np.ndarray:
     """Port of cpp/src/RCR.cpp:414. Weighted x-vector for single/double-line
-    fits — inverse-erf of cumulative weight fractions."""
+    fits — inverse-erf of cumulative weight fractions.
+
+    Scalar loop (NOT NumPy-vectorized): inverf() can't be vectorized bit-exactly
+    (see its docstring). The optional Numba JIT in rcrpy._fast compiles this loop
+    to machine code while preserving the exact scalar arithmetic.
+    """
     w_sum = float(np.sum(w))
     s_sum = 0.682689 * float(w[0])
     inv_w_sum = 1.0 / w_sum
@@ -461,7 +487,22 @@ def fitDL_w(counter: float, w: np.ndarray, x: np.ndarray, y: np.ndarray,
     err_full = single_line_fit * x_full - y_full
     single_line_error = _cpp_seqsum(w_full * err_full * err_full)
 
-    delta_chi_squared = (single_line_error - double_line_error) / double_line_error
+    # C++ computes (singleLineError - doubleLineError)/doubleLineError with
+    # IEEE float division (cpp/src/RCR.cpp:5834). On perfectly-linear /
+    # near-constant data the double-line fit is exact, so doubleLineError
+    # collapses to 0 and the C++ gets +inf / -inf / NaN -- all of which make
+    # the `delta_chi_squared < getFN(...)` test below false, leaving sigma at
+    # the double-line value. Python raises ZeroDivisionError on the scalar
+    # divide, so reproduce the IEEE result explicitly.
+    num = single_line_error - double_line_error
+    if double_line_error != 0.0:
+        delta_chi_squared = num / double_line_error
+    elif num > 0.0:
+        delta_chi_squared = math.inf
+    elif num < 0.0:
+        delta_chi_squared = -math.inf
+    else:
+        delta_chi_squared = math.nan
 
     if sigma < 0:
         sigma = 1e-10
@@ -477,12 +518,15 @@ def getFNRatio(x: np.ndarray, w: np.ndarray) -> float:
     n = x.size
     while counter < n and x[counter] < 1.0:
         counter += 1
+    if counter == 0:
+        return math.nan   # no x<1: C++ computes 0/0 -> NaN (no spread)
     mean = float(np.sum(w[:counter])) / counter
     st_dev = 0.0
     for i in range(counter):
         st_dev += (float(w[i]) - mean) ** 2
-    st_dev = math.sqrt(st_dev / (counter - 1))
-    return st_dev / mean
+    # counter == 1 -> sqrt(0/0) = NaN in C++ (single point, no CV). IEEE-safe.
+    st_dev = _cpp_sqrt_div(st_dev, counter - 1)
+    return math.nan if mean == 0.0 else st_dev / mean
 
 
 def getCFRatio(w: np.ndarray) -> float:
@@ -491,8 +535,9 @@ def getCFRatio(w: np.ndarray) -> float:
     n = w.size
     mean = float(np.sum(w)) / n
     diffs = w - mean
-    st_dev = math.sqrt(float(np.sum(diffs * diffs)) / (n - 1))
-    return st_dev / mean
+    # n == 1 -> sqrt(0/0) = NaN in C++ (single point, no CV). IEEE-safe divide.
+    st_dev = _cpp_sqrt_div(float(np.sum(diffs * diffs)), n - 1)
+    return math.nan if mean == 0.0 else st_dev / mean
 
 
 def halfSampleMode(y: np.ndarray) -> float:
@@ -559,11 +604,33 @@ def halfSampleMode(y: np.ndarray) -> float:
 # Sigma calculations
 # ---------------------------------------------------------------------------
 
+def _cpp_sqrt_div(top: float, denom: float) -> float:
+    """``sqrt(top / denom)`` with C++ ``pow``/``sqrt`` IEEE semantics (no
+    exception). When the kept set has no spread — e.g. a single point (N=1),
+    where the residual variance vanishes — ``denom`` goes to 0 and the C++
+    computes ``sqrt(0/0) = NaN`` (or ``sqrt(x/0) = +inf``). Python instead
+    raises ZeroDivisionError on the divide and ValueError on ``sqrt`` of a
+    negative, so reproduce the IEEE result: NaN for the indeterminate/negative
+    cases, +inf for ``x>0`` over 0. Downstream sigma handling then treats it as
+    'no spread -> nothing to reject' (kept set unchanged), matching the oracle.
+    Same C++-IEEE-vs-Python-raise guard as erfcCustom / _reject_ratio /
+    rejection._pow10pow10."""
+    if denom > 0.0:
+        frac = top / denom
+    elif denom == 0.0:
+        frac = math.inf if top > 0.0 else math.nan
+    else:  # denom < 0
+        frac = top / denom
+    if frac != frac or frac < 0.0:   # NaN or negative -> C++ sqrt -> NaN
+        return math.nan
+    return math.sqrt(frac)           # sqrt(+inf) -> +inf
+
+
 def getStDev(delta: float, y: np.ndarray) -> float:
     """Port of cpp/src/RCR.cpp:891. RMS-style estimator: sqrt(sum(y^2) / (n - delta))."""
     n = y.size
     top = float(np.sum(y * y))
-    return math.sqrt(top / (n - delta))
+    return _cpp_sqrt_div(top, n - delta)
 
 
 def getStDev_w(delta: float, w: np.ndarray, y: np.ndarray) -> float:
@@ -571,7 +638,7 @@ def getStDev_w(delta: float, w: np.ndarray, y: np.ndarray) -> float:
     top = float(np.sum(w * y * y))
     w_sum = float(np.sum(w))
     w_sum_sq = float(np.sum(w * w))
-    return math.sqrt(top / (w_sum - delta * w_sum_sq / w_sum))
+    return _cpp_sqrt_div(top, w_sum - delta * w_sum_sq / w_sum)
 
 
 def get68th(y: np.ndarray) -> float:
@@ -647,4 +714,28 @@ def distinctValuesCheck(flags: np.ndarray, y: np.ndarray) -> bool:
         if flags[i] and not isEqual(float(y[i]), a) and not isEqual(float(y[i]), b):
             return True
         i += 1
+    return False
+
+
+def distinctValuesCheckParam(param_count: int, flags: np.ndarray, y: np.ndarray) -> bool:
+    """Port of cpp/src/RCR.cpp:168 — the PARAMETRIC distinctness guard (3-arg overload).
+
+    Used for a parametric model instead of :func:`distinctValuesCheck`: True once MORE than
+    ``param_count`` distinct flagged values are seen. ``y`` is the compacted residual vector
+    ``trueY`` (size = kept-count) while ``flags`` is the FULL-size flag array — the C++ iterates
+    ``index`` over ``y`` (compacted) but reads ``flags[index]`` (full), so after early rejections it
+    samples a mis-aligned sub-window and stops the peel EARLIER than the 2-arg check would. That
+    mis-alignment is the C++ behaviour and is reproduced here for bit-parity (it is why the C++ keeps
+    2 more marginal scans on the noise-line fit than the 2-arg check does)."""
+    distincts: list[float] = []
+    for index in range(y.size):
+        if flags[index]:
+            distinct = True
+            for dj in distincts:
+                if isEqual(dj, float(y[index])):
+                    distinct = False
+            if distinct:
+                distincts.append(float(y[index]))
+        if len(distincts) > param_count:
+            return True
     return False
