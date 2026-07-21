@@ -7,7 +7,7 @@ For each (tech, dataset, weighted?) tuple, report:
   - whether flags / indices are bit-identical
 
 Run from the repo root:
-    python python/reflect_parity.py
+    python rcrpy/reflect_parity.py
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import numpy as np
 import rcr  # oracle
 import rcrpy
 
-REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
+REPO = Path(__file__).resolve().parents[2]  # rcrpy/benchmarks/x.py -> repo root
 ASSETS = REPO / "assets" / "test"
 
 

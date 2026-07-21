@@ -6,7 +6,7 @@ parametric model, partials, and initial guess; we time best-of-3 and
 report the parameter agreement.
 
 Run from the repo root:
-    python python/diagnostics_functional.py
+    python rcrpy/diagnostics_functional.py
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import numpy as np
 import rcr   # oracle
 import rcrpy
 
-REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
+REPO = Path(__file__).resolve().parents[2]  # rcrpy/benchmarks/x.py -> repo root
 ASSETS = REPO / "assets" / "test"
 
 

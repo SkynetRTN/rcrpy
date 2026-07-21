@@ -16,9 +16,9 @@ tools that live alongside the source.
 Each script is self-contained. From the repo root:
 
 ```bash
-python python/benchmarks/reflect_parity.py
-python python/benchmarks/diagnostics.py
-python python/benchmarks/diagnostics_functional.py
+python rcrpy/benchmarks/reflect_parity.py
+python rcrpy/benchmarks/diagnostics.py
+python rcrpy/benchmarks/diagnostics_functional.py
 ```
 
 All four require the legacy `rcr` C++ module (the oracle) plus `rcrpy`

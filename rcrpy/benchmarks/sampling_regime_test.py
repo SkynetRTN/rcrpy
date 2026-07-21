@@ -15,7 +15,7 @@ Compares the post-fix port (MT19937(0xC0FFEE) + C++-matching sampler)
 against the deterministic C++ oracle (same fix on the C++ side).
 
 Run:
-    python python/benchmarks/sampling_regime_test.py
+    python rcrpy/benchmarks/sampling_regime_test.py
 """
 from __future__ import annotations
 

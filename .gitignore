@@ -48,8 +48,9 @@ dmypy.json
 # pyenv
 .python-version
 
-# Sphinx documentation
-docs/_build/
+# Sphinx documentation (match at any depth — docs live under rcrpy/docs/)
+**/docs/_build/
+**/docs/generated/
 
 # ============================================================================
 # Virtual environments (project-specific names + the standard ones)

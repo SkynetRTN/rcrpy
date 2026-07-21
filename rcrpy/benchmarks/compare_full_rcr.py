@@ -29,10 +29,10 @@ Datasets exercised:
 
 Run from the repo root:
 
-    python python/benchmarks/compare_full_rcr.py
+    python rcrpy/benchmarks/compare_full_rcr.py
 
 Requires the legacy `rcr` C++ module installed (`pip install rcr`) and
-`full_rcr.py` present at python/full_rcr.py (the vendored standalone).
+`full_rcr.py` present at rcrpy/full_rcr.py (the vendored standalone).
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ import numpy as np
 
 # Locate full_rcr.py and import it from python/.
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "python"))
+sys.path.insert(0, str(REPO / "rcrpy"))
 
 import full_rcr   # the Python port (this is what we're validating)
 import rcr        # the legacy C++ module (proxy for full_rcr.cpp)

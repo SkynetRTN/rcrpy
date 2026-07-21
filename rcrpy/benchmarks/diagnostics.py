@@ -4,7 +4,7 @@
   3. Bit-identity of decisions (flags / cleanY)
 
 Run from repository root:
-    python python/diagnostics.py
+    python rcrpy/diagnostics.py
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import numpy as np
 import rcr  # oracle
 import rcrpy
 
-REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
+REPO = Path(__file__).resolve().parents[2]  # rcrpy/benchmarks/x.py -> repo root
 ASSETS = REPO / "assets" / "test"
 
 

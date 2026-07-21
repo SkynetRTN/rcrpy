@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Make full_rcr.py importable: it lives one level up from this script
-# (python/full_rcr.py, while this is python/scripts/smoke_test_full_rcr.py).
+# (rcrpy/full_rcr.py, while this is rcrpy/scripts/smoke_test_full_rcr.py).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np

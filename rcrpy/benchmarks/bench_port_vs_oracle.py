@@ -4,7 +4,7 @@ Not a parity test — `tests/test_parity_lsmode68.py` covers correctness.
 This is a sanity check on how far the port is from the C++ oracle in
 absolute terms. Run from the repository root:
 
-    python python/bench_port_vs_oracle.py
+    python rcrpy/bench_port_vs_oracle.py
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import numpy as np
 import rcr  # legacy C++ oracle
 import rcrpy
 
-REPO = Path(__file__).resolve().parents[2]  # python/benchmarks/x.py -> repo root
+REPO = Path(__file__).resolve().parents[2]  # rcrpy/benchmarks/x.py -> repo root
 CSV = REPO / "assets" / "test" / "data_singlevalue.csv"
 
 with open(CSV, newline="") as f:

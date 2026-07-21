@@ -38,7 +38,7 @@ __all__ = [
     "enable_fast",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 import os as _os
 if _os.environ.get("RCRPY_FAST"):
